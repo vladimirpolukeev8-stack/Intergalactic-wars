@@ -1,0 +1,11 @@
+name = "intergalactic-wars-online"
+main = "src/index.js"
+compatibility_date = "2026-11-20"
+
+[[durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Matchmaker"]
