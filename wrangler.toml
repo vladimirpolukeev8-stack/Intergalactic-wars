@@ -1,6 +1,6 @@
 name = "intergalactic-wars-online"
 main = "src/index.js"
-compatibility_date = "2026-11-20"
+compatibility_date = "2026-10-01"
 
 [[durable_objects.bindings]]
 name = "MATCHMAKER"
