@@ -51,9 +51,14 @@ export class Matchmaker {
     const url = new URL(request.url);
     const playerId = (url.searchParams.get("playerId") || "").slice(0, 80);
     const rating = Number(url.searchParams.get("rating") || 1000);
+    let roster = [];
+    try {
+      const parsed = JSON.parse(url.searchParams.get("roster") || "[]");
+      if (Array.isArray(parsed)) roster = parsed.filter((id) => typeof id === "string" && /^[a-zA-Z0-9_-]{1,48}$/.test(id)).slice(0, 3);
+    } catch {}
 
     if (!/^[a-zA-Z0-9_-]{8,80}$/.test(playerId) ||
-        !Number.isFinite(rating) || rating < 0 || rating > 100000) {
+        !Number.isFinite(rating) || rating < 0 || rating > 100000 || roster.length !== 3) {
       return Response.json({ error: "Invalid playerId or rating" }, { status: 400 });
     }
 
@@ -65,6 +70,7 @@ export class Matchmaker {
     server.serializeAttachment({
       playerId,
       rating: Math.round(rating),
+      roster,
       status: "waiting",
       connectedAt: Date.now(),
     });
@@ -93,13 +99,13 @@ export class Matchmaker {
         type: "matched",
         roomId,
         self: { playerId, rating: Math.round(rating) },
-        opponent: { playerId: other.playerId, rating: other.rating },
+        opponent: { playerId: other.playerId, rating: other.rating, roster: other.roster },
       });
       const packetB = JSON.stringify({
         type: "matched",
         roomId,
         self: { playerId: other.playerId, rating: other.rating },
-        opponent: { playerId, rating: Math.round(rating) },
+        opponent: { playerId, rating: Math.round(rating), roster },
       });
       server.send(packetA);
       opponent.send(packetB);
@@ -122,7 +128,7 @@ export class Matchmaker {
       return;
     }
 
-    const allowed = new Set(["input", "action", "snapshot", "leave", "ping"]);
+    const allowed = new Set(["input", "action", "snapshot", "hit", "leave", "ping"]);
     if (!packet || !allowed.has(packet.type)) return;
 
     for (const peer of this.ctx.getWebSockets()) {
