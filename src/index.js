@@ -54,7 +54,7 @@ export class Matchmaker {
     let roster = [];
     try {
       const parsed = JSON.parse(url.searchParams.get("roster") || "[]");
-      if (Array.isArray(parsed)) roster = parsed.filter((id) => typeof id === "string" && /^[a-zA-Z0-9_-]{1,48}$/.test(id)).slice(0, 3);
+      if (Array.isArray(parsed)) roster = [...new Set(parsed.filter((id) => typeof id === "string" && /^[a-zA-Z0-9_-]{1,48}$/.test(id)))].slice(0, 3);
     } catch {}
 
     if (!/^[a-zA-Z0-9_-]{8,80}$/.test(playerId) ||
@@ -92,7 +92,7 @@ export class Matchmaker {
     if (opponent) {
       const other = opponent.deserializeAttachment();
       const roomId = crypto.randomUUID();
-      server.serializeAttachment({ playerId, rating: Math.round(rating), status: "matched", roomId, opponentId: other.playerId });
+      server.serializeAttachment({ playerId, rating: Math.round(rating), roster, status: "matched", roomId, opponentId: other.playerId });
       opponent.serializeAttachment({ ...other, status: "matched", roomId, opponentId: playerId });
 
       const packetA = JSON.stringify({
