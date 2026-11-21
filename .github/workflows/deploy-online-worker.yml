@@ -22,6 +22,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate online Worker JavaScript
+        run: node --check src/index.js
       - name: Configure Telegram bot token when repository secret is available
         if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' }}
         env:
