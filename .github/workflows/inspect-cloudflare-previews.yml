@@ -23,6 +23,13 @@ jobs:
             exit 1
           fi
 
+          # Remove accidental spaces/newlines from the Account ID secret.
+          CF_ACCOUNT_ID="$(printf '%s' "$CF_ACCOUNT_ID" | tr -d '[:space:]')"
+          if [[ ! "$CF_ACCOUNT_ID" =~ ^[a-fA-F0-9]{32}$ ]]; then
+            echo "::error::CLOUDFLARE_ACCOUNT_ID must be exactly 32 hexadecimal characters. Check the GitHub secret."
+            exit 1
+          fi
+
           scripts="$(curl --fail-with-body --silent --show-error \
             "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts" \
             -H "Authorization: Bearer $CF_API_TOKEN")"
