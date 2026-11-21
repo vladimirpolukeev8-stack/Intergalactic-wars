@@ -6,7 +6,7 @@ export default {
       return Response.json({
         ok: true,
         service: "intergalactic-wars-game",
-        build: "online-smooth",
+        build: "telegram-preview-validation",
       });
     }
 

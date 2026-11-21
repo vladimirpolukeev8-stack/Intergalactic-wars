@@ -1,6 +1,9 @@
+# Telegram Mini App Preview validation
 name = "orange-meadow-ad87"
 main = "src/game-entry.js"
 compatibility_date = "2026-10-01"
+
+previews = { }
 
 [assets]
 directory = "./public"

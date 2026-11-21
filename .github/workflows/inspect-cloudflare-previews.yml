@@ -20,6 +20,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          echo "Inspecting Cloudflare Worker Builds settings for commit $GITHUB_SHA"
 
           if [[ -z "${CF_API_TOKEN:-}" || -z "${CF_ACCOUNT_ID:-}" ]]; then
             echo "::error::Missing CLOUDFLARE_BUILDS_TOKEN or CLOUDFLARE_ACCOUNT_ID repository secret."
