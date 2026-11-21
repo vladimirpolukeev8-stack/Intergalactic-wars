@@ -421,7 +421,7 @@ background:rgba(10,10,12,.72);border-top:1px solid var(--line);backdrop-filter:b
 .socialPersonInfo{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
 .socialPersonInfo b,.clanListRow b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .socialPersonInfo small,.clanListRow small{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.socialOnline{font-size:8px;letter-spacing:1px;color:var(--good);font-weight:800}
+.socialOnline{font-size:8px;letter-spacing:1px;color:var(--good);font-weight:800}.socialOnline.offline{color:var(--muted)}
 .socialActions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 .socialActions .btn{font-size:9px;padding:8px 10px;border-radius:10px}
 .socialSubhead{margin:20px 0 9px;font:800 10px Manrope,sans-serif;letter-spacing:1.5px;color:var(--acc2)}
@@ -1091,6 +1091,7 @@ async function initializeTelegramAccount(){
    await putCloudProfile();
   }
   cloudSyncReady=true;
+  startSocialPresence();
   window.__igwAccount=authData.user;
   window.__igwAccountStatus='connected';
  }catch(error){
@@ -2929,13 +2930,22 @@ async function socialRequest(path,body){
  if(!response.ok)throw new Error(data.error||('Ошибка сервера: '+response.status));
  return data;
 }
+let socialPresenceTimer=null;
+async function heartbeatPresence(){if(!cloudToken)return;try{await socialRequest('/presence',{});}catch(e){}}
+async function refreshFriendPresence(){
+ if(!cloudToken||curScreen!=='social')return;
+ try{const data=await socialRequest('/');const online=new Map((data.friends||[]).map(u=>[String(u.id),!!u.online]));
+  document.querySelectorAll('[data-friend-id]').forEach(el=>{const on=online.get(el.dataset.friendId)===true;el.textContent=on?'В СЕТИ':'НЕ В СЕТИ';el.classList.toggle('offline',!on);});
+ }catch(e){}
+}
+function startSocialPresence(){if(socialPresenceTimer)return;heartbeatPresence();socialPresenceTimer=setInterval(()=>{if(document.visibilityState!=='visible')return;heartbeatPresence();refreshFriendPresence();},20000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')heartbeatPresence();});}
 async function renderSocial(){
  const root=$('#scr-social');
  root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья, кланы и приглашения игроков</div></div><span class="tag">TELEGRAM ONLINE</span></div><div class="socialLoading card glass">ЗАГРУЖАЕМ СОЦИАЛЬНЫЕ ДАННЫЕ…</div>';
  if(!cloudToken){root.querySelector('.socialLoading').innerHTML='Для доступа к друзьям и кланам открой мини-приложение через своего Telegram-бота.';return;}
  try{
   const [data,clans]=await Promise.all([socialRequest('/'),socialRequest('/clans')]);
-  const friendRows=(data.friends||[]).map(u=>'<div class="socialPerson"><div class="socialAvatar">'+(u.photoUrl?'<img src="'+socialEsc(u.photoUrl)+'" alt="">':'<span>✦</span>')+'</div><div class="socialPersonInfo"><b>'+socialEsc(u.firstName||u.username||'Игрок')+'</b><small>'+(u.username?'@'+socialEsc(u.username):'ID '+socialEsc(u.id))+'</small></div><span class="socialOnline">ДРУГ</span></div>').join('')||'<div class="socialEmpty">Пока нет друзей. Найди игрока по Telegram ID или username.</div>';
+  const friendRows=(data.friends||[]).map(u=>'<div class="socialPerson"><div class="socialAvatar">'+(u.photoUrl?'<img src="'+socialEsc(u.photoUrl)+'" alt="">':'<span>✦</span>')+'</div><div class="socialPersonInfo"><b>'+socialEsc(u.firstName||u.username||'Игрок')+'</b><small>'+(u.username?'@'+socialEsc(u.username):'ID '+socialEsc(u.id))+'</small></div><span class="socialOnline '+(u.online?'':'offline')+'" data-friend-id="'+socialEsc(u.id)+'">'+(u.online?'В СЕТИ':'НЕ В СЕТИ')+'</span></div>').join('')||'<div class="socialEmpty">Пока нет друзей. Найди игрока по Telegram ID или username.</div>';
   const incoming=(data.incoming||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>'+socialEsc(x.user.firstName||x.user.username||'Игрок')+'</b><small>'+(x.user.username?'@'+socialEsc(x.user.username):'ID '+socialEsc(x.user.id))+'</small></div><div class="socialActions"><button class="btn primary" data-social-action="friend-accept" data-id="'+socialEsc(x.requestId)+'">ПРИНЯТЬ</button><button class="btn" data-social-action="friend-decline" data-id="'+socialEsc(x.requestId)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Новых заявок нет.</div>';
   const outgoing=(data.outgoing||[]).map(x=>'<div class="socialPending">Ожидает ответа: '+socialEsc(x.user.firstName||x.user.username||x.user.id)+'</div>').join('');
   const clan=data.clan?'<div class="clanBanner"><div class="clanMark">['+socialEsc(data.clan.tag)+']</div><div class="clanInfo"><h2>'+socialEsc(data.clan.name)+'</h2><span>'+data.clan.members+' УЧАСТНИКОВ · '+(data.clan.role==='leader'?'ГЛАВА':'УЧАСТНИК')+'</span></div><button class="btn" data-social-action="clan-leave">ПОКИНУТЬ</button></div><div class="socialForm"><input id="clanInviteTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="clan-invite">ПРИГЛАСИТЬ В КЛАН</button></div>':'<div class="clanCreate"><h3>СОЗДАТЬ КЛАН</h3><p class="mut">Собери команду и приглашай друзей.</p><div class="socialForm"><input id="clanName" maxlength="24" placeholder="Название клана"><input id="clanTag" maxlength="5" placeholder="ТЕГ"><button class="btn primary" data-social-action="clan-create">СОЗДАТЬ</button></div></div>';
@@ -2944,7 +2954,7 @@ async function renderSocial(){
   root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Играй вместе. Собирай команду. Создавай кланы.</div></div><span class="tag ok">АККАУНТ ПОДКЛЮЧЁН</span></div>'+
   '<div class="socialGrid"><section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>ДРУЗЬЯ</h2><p class="mut">Добавление по Telegram ID или username</p></div><span class="socialCount">'+(data.friends||[]).length+'</span></div><div class="socialForm"><input id="friendTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="friend-add">ДОБАВИТЬ</button></div><div class="socialList">'+friendRows+'</div><div class="socialSubhead">ВХОДЯЩИЕ ЗАЯВКИ</div><div class="socialList">'+incoming+'</div>'+outgoing+'</section>'+
   '<section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>КЛАНЫ</h2><p class="mut">Создай свой или вступи в существующий</p></div><span class="socialCount">'+(data.clan?'1':'0')+'</span></div>'+clan+'<div class="socialSubhead">ПРИГЛАШЕНИЯ</div><div class="socialList">'+clanInv+'</div><div class="socialSubhead">ОТКРЫТЫЕ КЛАНЫ</div><div class="socialList">'+clanRows+'</div></section></div>'+
-  '<div class="socialFoot">Поиск доступен среди игроков, которые уже запускали Intergalactic Wars через Telegram. Статус «в игре» пока не является индикатором присутствия в реальном времени.</div>';
+  '<div class="socialFoot">Поиск доступен среди игроков, которые уже запускали Intergalactic Wars через Telegram. Статус присутствия обновляется автоматически примерно каждые 20 секунд.</div>';
  }catch(error){root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья и кланы</div></div></div><div class="card glass socialError">'+socialEsc(error.message)+'<button class="btn" data-social-action="refresh">ПОВТОРИТЬ</button></div>';}
 }
 document.addEventListener('click',async e=>{
