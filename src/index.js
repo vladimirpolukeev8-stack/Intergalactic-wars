@@ -62,8 +62,9 @@ export default {
         {
           ok: true,
           service: "intergalactic-wars-matchmaker",
-          version: 3,
+          version: 4,
           telegramAccounts: true,
+          social: { friends: true, clans: true, clanInvites: true },
           queues: {
             ranked_duel: { playersPerMatch: 2, rosterPerPlayer: 3 },
             boss_coop: { playersPerMatch: 3, rosterPerPlayer: 1 },
