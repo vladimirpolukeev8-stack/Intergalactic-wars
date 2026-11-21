@@ -1,3 +1,4 @@
+# Re-deploys the online Worker after repository secrets are updated.
 name: Deploy Intergalactic Wars online Worker
 
 on:
