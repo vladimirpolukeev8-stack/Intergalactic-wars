@@ -329,6 +329,7 @@ export class AccountStore {
       "CREATE TABLE IF NOT EXISTS clan_members (clan_id TEXT NOT NULL, telegram_id TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', joined_at INTEGER NOT NULL, PRIMARY KEY(clan_id,telegram_id));" +
       "CREATE TABLE IF NOT EXISTS clan_invites (id TEXT PRIMARY KEY, clan_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, UNIQUE(clan_id,to_id));"
     );
+    try { this.ctx.storage.sql.exec("ALTER TABLE users ADD COLUMN presence_at INTEGER NOT NULL DEFAULT 0"); } catch {}
   }
   async fetch(request) {
     const url = new URL(request.url);
@@ -362,10 +363,14 @@ export class AccountStore {
       if (!session) return Response.json({ error: "Session expired" }, { status: 401 });
       const me = session.telegram_id, now = Date.now(), path = url.pathname;
       const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
-      const userCard = (row) => ({ id: row.telegram_id, username: row.username || "", firstName: row.first_name || "", photoUrl: row.photo_url || "" });
+      const userCard = (row) => ({ id: row.telegram_id, username: row.username || "", firstName: row.first_name || "", photoUrl: row.photo_url || "", online: Number(row.presence_at || 0) > now - 45000 });
+      if (path === "/social/presence" && request.method === "POST") {
+        this.ctx.storage.sql.exec("UPDATE users SET presence_at=? WHERE telegram_id=?", now, me);
+        return Response.json({ ok: true, onlineUntil: now + 45000 });
+      }
       if (path === "/social" && request.method === "GET") {
         const friends = this.ctx.storage.sql.exec(
-          "SELECT u.telegram_id,u.username,u.first_name,u.photo_url FROM friend_requests f JOIN users u ON u.telegram_id=CASE WHEN f.from_id=? THEN f.to_id ELSE f.from_id END WHERE (f.from_id=? OR f.to_id=?) AND f.status='accepted' ORDER BY u.first_name,u.username",
+          "SELECT u.telegram_id,u.username,u.first_name,u.photo_url,u.presence_at FROM friend_requests f JOIN users u ON u.telegram_id=CASE WHEN f.from_id=? THEN f.to_id ELSE f.from_id END WHERE (f.from_id=? OR f.to_id=?) AND f.status='accepted' ORDER BY u.first_name,u.username",
           me,me,me
         ).toArray().map(userCard);
         const incoming = this.ctx.storage.sql.exec("SELECT f.id,u.telegram_id,u.username,u.first_name,u.photo_url FROM friend_requests f JOIN users u ON u.telegram_id=f.from_id WHERE f.to_id=? AND f.status='pending' ORDER BY f.created_at DESC",me).toArray().map(r=>({requestId:r.id,user:userCard(r)}));
