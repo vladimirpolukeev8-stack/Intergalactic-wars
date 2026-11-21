@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - "src/index.js"
+      - "src/game-entry.js"
+      - "public/**"
       - "wrangler.toml"
+      - "wrangler-game.toml"
       - ".github/workflows/validate.yml"
   workflow_dispatch:
 
@@ -17,4 +20,18 @@ jobs:
         with:
           node-version: 22
       - name: Check Worker JavaScript syntax
-        run: node --check src/index.js
+        run: |
+          node --check src/index.js
+          node --check src/game-entry.js
+      - name: Check Telegram game inline JavaScript
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const html = fs.readFileSync("public/index.html", "utf8");
+          const scripts = [...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)]
+            .map((match) => match[1])
+            .filter((script) => script.trim().length > 0);
+          if (scripts.length === 0) throw new Error("No inline JavaScript found in public/index.html");
+          fs.writeFileSync("/tmp/igw-inline.js", scripts.join("\\n"));
+          NODE
+          node --check /tmp/igw-inline.js
