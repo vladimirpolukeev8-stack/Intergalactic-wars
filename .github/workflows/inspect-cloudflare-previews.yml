@@ -1,0 +1,54 @@
+name: Inspect Cloudflare Preview settings
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inspect Worker Builds configuration
+        env:
+          CF_API_TOKEN: ${{ secrets.CLOUDFLARE_BUILDS_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${CF_API_TOKEN:-}" || -z "${CF_ACCOUNT_ID:-}" ]]; then
+            echo "::error::Missing CLOUDFLARE_BUILDS_TOKEN or CLOUDFLARE_ACCOUNT_ID repository secret."
+            exit 1
+          fi
+
+          scripts="$(curl --fail-with-body --silent --show-error \
+            "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/workers/scripts" \
+            -H "Authorization: Bearer $CF_API_TOKEN")"
+
+          echo "$scripts" | jq -e '.success == true' >/dev/null
+
+          for worker in orange-meadow-ad87 intergalactic-wars-online; do
+            tag="$(echo "$scripts" | jq -r --arg worker "$worker" '.result[] | select(.id == $worker) | .tag' | head -n 1)"
+
+            echo "=== $worker ==="
+            if [[ -z "$tag" || "$tag" == "null" ]]; then
+              echo "Worker tag not found in this Cloudflare account."
+              continue
+            fi
+
+            config="$(curl --fail-with-body --silent --show-error \
+              "https://api.cloudflare.com/client/v4/accounts/$CF_ACCOUNT_ID/builds/workers/$tag" \
+              -H "Authorization: Bearer $CF_API_TOKEN")"
+
+            echo "$config" | jq -e '.success == true' >/dev/null
+            echo "$config" | jq '{
+              previews_enabled: .result.previews_enabled,
+              preview_build_command: .result.previews_base_config.build_command,
+              preview_deploy_command: .result.previews_base_config.deploy_command,
+              production_build_command: .result.production_settings.build_command,
+              production_deploy_command: .result.production_settings.deploy_command,
+              production_branch: .result.git_repository.branch
+            }'
+          done
