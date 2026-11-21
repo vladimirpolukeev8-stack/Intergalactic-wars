@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<script src="https://telegram.org/js/telegram-web-app.js?65"></script>
 <title>Intergalactic Wars</title>
 <style>
 @font-face{font-family:'Manrope';src:url('https://cdn.jsdelivr.net/fontsource/fonts/manrope@latest/cyrillic-400-normal.woff2') format('woff2');font-weight:400;font-display:swap}
@@ -1008,7 +1009,55 @@ function tournamentRank(points){
  let current=tiers[0],next=null;for(let i=0;i<tiers.length;i++){if(points>=tiers[i][1])current=tiers[i];else{next=tiers[i];break;}}
  return {name:current[0],floor:current[1],next:next?next[1]:null,progress:next?Math.min(100,(points-current[1])/(next[1]-current[1])*100):100};
 }
-function save(){try{localStorage.setItem('igw4',JSON.stringify(state));}catch(e){}}
+
+let cloudSyncReady=false,cloudToken=null,cloudSaveTimer=null;
+const CLOUD_API=location.hostname.endsWith('.workers.dev')&&location.hostname.startsWith('telegram-account-foundation-')?'https://telegram-account-foundation-intergalactic-wars-online.vladimirpolukeev8.workers.dev':'https://intergalactic-wars-online.vladimirpolukeev8.workers.dev';
+async function putCloudProfile(){
+ if(!cloudToken)return;
+ state._cloudUpdatedAt=Date.now();
+ const response=await fetch(CLOUD_API+'/api/profile',{method:'PUT',headers:{'content-type':'application/json','authorization':'Bearer '+cloudToken},body:JSON.stringify({state})});
+ if(!response.ok)throw new Error('Cloud profile save failed: '+response.status);
+}
+function queueCloudProfileSave(){
+ if(!cloudSyncReady||!cloudToken)return;
+ clearTimeout(cloudSaveTimer);
+ cloudSaveTimer=setTimeout(()=>{putCloudProfile().catch(e=>console.warn('Cloud profile sync:',e));},1100);
+}
+function save(){try{state._cloudUpdatedAt=Date.now();localStorage.setItem('igw4',JSON.stringify(state));}catch(e){}queueCloudProfileSave();}
+async function initializeTelegramAccount(){
+ const tg=window.Telegram&&window.Telegram.WebApp;
+ if(!tg||!tg.initData)return;
+ try{
+  tg.ready();tg.expand();
+  const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData:tg.initData})});
+  if(!auth.ok)throw new Error('Telegram auth failed: '+auth.status);
+  const authData=await auth.json();cloudToken=authData.token;
+  const response=await fetch(CLOUD_API+'/api/profile',{headers:{'authorization':'Bearer '+cloudToken}});
+  if(!response.ok)throw new Error('Cloud profile read failed: '+response.status);
+  const remote=await response.json();
+  if(remote.profile&&typeof remote.profile==='object'){
+   const cloudTime=Number(remote.updatedAt)||0;
+   const localTime=Number(state._cloudUpdatedAt)||0;
+   if(cloudTime>localTime){
+    state=Object.assign({},DEF,remote.profile);state._cloudUpdatedAt=cloudTime;
+    localStorage.setItem('igw4',JSON.stringify(state));
+    const marker='igw_cloud_restore_reload';
+    if(sessionStorage.getItem(marker)!==String(cloudTime)){sessionStorage.setItem(marker,String(cloudTime));location.reload();return;}
+   }else{
+    await putCloudProfile();
+   }
+  }else{
+   await putCloudProfile();
+  }
+  cloudSyncReady=true;
+  window.__igwAccount=authData.user;
+  window.__igwAccountStatus='connected';
+ }catch(error){
+  window.__igwAccountStatus='offline';
+  console.warn('Telegram account/cloud sync:',error);
+ }
+}
+
 function rng(seed){let a=seed>>>0;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
 function hseed(n,k){return Math.imul(n,2654435761)^Math.imul(k||1,40503);}
 const SND=(()=>{
@@ -4589,6 +4638,7 @@ addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;if(mode==='b
 /* ---------- boot ---------- */
 if(state.control){$('#bootHint').textContent='Прошлый выбор: '+(state.control==='pc'?'клавиатура':'сенсор');(state.control==='pc'?$('#bootPc'):$('#bootTouch')).classList.add('last');}
 if(window.Telegram&&Telegram.WebApp){Telegram.WebApp.ready();Telegram.WebApp.expand();}
+initializeTelegramAccount();
 menuG.position.x=menuOffset();
 try{buildFeatured();}catch(e){console.error('Initial character preview:',e);}
 window.__igwStage='Игра готова к запуску';
