@@ -1,7 +1,7 @@
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
   "access-control-allow-headers": "content-type, authorization, upgrade",
 };
 
@@ -98,6 +98,17 @@ export default {
       }
       const path = url.pathname === "/api/me" ? "/me" : "/profile";
       const result = await accountRequest(env, path, "GET", undefined, token);
+      return new Response(result.body, { status: result.status, headers: JSON_HEADERS });
+    }
+
+    if (url.pathname.startsWith("/api/social")) {
+      const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      const suffix = url.pathname.slice("/api/social".length);
+      const raw = request.method === "GET" ? undefined : await request.text();
+      if (raw && raw.length > 16384) return Response.json({ error: "Payload too large" }, { status: 413, headers: JSON_HEADERS });
+      let body;
+      if (raw) { try { body = JSON.parse(raw); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers: JSON_HEADERS }); } }
+      const result = await accountRequest(env, "/social" + suffix + (url.search || ""), request.method, body, token);
       return new Response(result.body, { status: result.status, headers: JSON_HEADERS });
     }
 
@@ -310,7 +321,12 @@ export class AccountStore {
       "CREATE TABLE IF NOT EXISTS users (telegram_id TEXT PRIMARY KEY, username TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', photo_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);" +
       "CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, telegram_id TEXT NOT NULL, expires_at INTEGER NOT NULL);" +
       "CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);" +
-      "CREATE TABLE IF NOT EXISTS profiles (telegram_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL);"
+      "CREATE TABLE IF NOT EXISTS profiles (telegram_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL);" +
+      "CREATE TABLE IF NOT EXISTS friend_requests (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(from_id,to_id));" +
+      "CREATE INDEX IF NOT EXISTS friend_to_status_idx ON friend_requests(to_id,status);" +
+      "CREATE TABLE IF NOT EXISTS clans (id TEXT PRIMARY KEY, name TEXT NOT NULL, tag TEXT NOT NULL UNIQUE, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL);" +
+      "CREATE TABLE IF NOT EXISTS clan_members (clan_id TEXT NOT NULL, telegram_id TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', joined_at INTEGER NOT NULL, PRIMARY KEY(clan_id,telegram_id));" +
+      "CREATE TABLE IF NOT EXISTS clan_invites (id TEXT PRIMARY KEY, clan_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, UNIQUE(clan_id,to_id));"
     );
   }
   async fetch(request) {
@@ -334,6 +350,108 @@ export class AccountStore {
       const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
       this.ctx.storage.sql.exec("INSERT INTO sessions (token_hash, telegram_id, expires_at) VALUES (?, ?, ?)", tokenHash, String(user.id), expiresAt);
       return Response.json({ token, expiresAt, user: { id: String(user.id), username: user.username || "", firstName: user.firstName || "", lastName: user.lastName || "", photoUrl: user.photoUrl || "" }, isNew: !existing });
+    }
+    if (url.pathname.startsWith("/social")) {
+      const auth = request.headers.get("authorization") || "";
+      const token = auth.replace(/^Bearer\s+/i, "");
+      if (!token || token.length > 256) return Response.json({ error: "Unauthorized" }, { status: 401 });
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+      const tokenHash = [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join("");
+      const session = this.ctx.storage.sql.exec("SELECT telegram_id FROM sessions WHERE token_hash = ? AND expires_at > ?", tokenHash, Date.now()).toArray()[0];
+      if (!session) return Response.json({ error: "Session expired" }, { status: 401 });
+      const me = session.telegram_id, now = Date.now(), path = url.pathname;
+      const body = request.method === "GET" ? {} : await request.json().catch(() => ({}));
+      const userCard = (row) => ({ id: row.telegram_id, username: row.username || "", firstName: row.first_name || "", photoUrl: row.photo_url || "" });
+      if (path === "/social" && request.method === "GET") {
+        const friends = this.ctx.storage.sql.exec(
+          "SELECT u.telegram_id,u.username,u.first_name,u.photo_url FROM friend_requests f JOIN users u ON u.telegram_id=CASE WHEN f.from_id=? THEN f.to_id ELSE f.from_id END WHERE (f.from_id=? OR f.to_id=?) AND f.status='accepted' ORDER BY u.first_name,u.username",
+          me,me,me
+        ).toArray().map(userCard);
+        const incoming = this.ctx.storage.sql.exec("SELECT f.id,u.telegram_id,u.username,u.first_name,u.photo_url FROM friend_requests f JOIN users u ON u.telegram_id=f.from_id WHERE f.to_id=? AND f.status='pending' ORDER BY f.created_at DESC",me).toArray().map(r=>({requestId:r.id,user:userCard(r)}));
+        const outgoing = this.ctx.storage.sql.exec("SELECT f.id,u.telegram_id,u.username,u.first_name,u.photo_url FROM friend_requests f JOIN users u ON u.telegram_id=f.to_id WHERE f.from_id=? AND f.status='pending' ORDER BY f.created_at DESC",me).toArray().map(r=>({requestId:r.id,user:userCard(r)}));
+        const clanRow = this.ctx.storage.sql.exec("SELECT c.id,c.name,c.tag,c.owner_id,m.role,(SELECT COUNT(*) FROM clan_members cm WHERE cm.clan_id=c.id) AS members FROM clan_members m JOIN clans c ON c.id=m.clan_id WHERE m.telegram_id=?",me).toArray()[0] || null;
+        const clan = clanRow ? {id:clanRow.id,name:clanRow.name,tag:clanRow.tag,ownerId:clanRow.owner_id,role:clanRow.role,members:clanRow.members} : null;
+        const clanInvites = this.ctx.storage.sql.exec("SELECT i.id,c.name,c.tag,u.username,u.first_name FROM clan_invites i JOIN clans c ON c.id=i.clan_id JOIN users u ON u.telegram_id=i.from_id WHERE i.to_id=? AND i.status='pending' ORDER BY i.created_at DESC",me).toArray().map(r=>({id:r.id,clanName:r.name,tag:r.tag,from:r.username||r.first_name||"Игрок"}));
+        return Response.json({friends,incoming,outgoing,clan,clanInvites});
+      }
+      if (path === "/social/friends/request" && request.method === "POST") {
+        const target = String(body.target || "").trim().replace(/^@/,"").slice(0,64);
+        if (!target) return Response.json({error:"Укажи Telegram ID или @username"}, {status:400});
+        const targetUser = this.ctx.storage.sql.exec("SELECT telegram_id FROM users WHERE telegram_id=? OR lower(username)=lower(?) LIMIT 1",target,target).toArray()[0];
+        if (!targetUser) return Response.json({error:"Игрок не найден. Он должен хотя бы раз открыть игру."},{status:404});
+        if (targetUser.telegram_id === me) return Response.json({error:"Нельзя добавить самого себя"},{status:400});
+        const existing=this.ctx.storage.sql.exec("SELECT id,status FROM friend_requests WHERE (from_id=? AND to_id=?) OR (from_id=? AND to_id=?)",me,targetUser.telegram_id,targetUser.telegram_id,me).toArray()[0];
+        if(existing){if(existing.status==="accepted")return Response.json({error:"Вы уже друзья"},{status:409});return Response.json({error:"Заявка уже существует"},{status:409});}
+        this.ctx.storage.sql.exec("INSERT INTO friend_requests (id,from_id,to_id,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?)",crypto.randomUUID(),me,targetUser.telegram_id,now,now);
+        return Response.json({ok:true});
+      }
+      if (path === "/social/friends/respond" && request.method === "POST") {
+        const id=String(body.requestId||"").slice(0,64), accept=body.accept===true;
+        const result=this.ctx.storage.sql.exec("UPDATE friend_requests SET status=?,updated_at=? WHERE id=? AND to_id=? AND status='pending'",accept?"accepted":"declined",now,id,me);
+        return Response.json({ok:result.rowsWritten===1});
+      }
+      if (path === "/social/clans" && request.method === "GET") {
+        const q=String(url.searchParams.get("q")||"").trim().slice(0,40);
+        const rows=this.ctx.storage.sql.exec("SELECT c.id,c.name,c.tag,c.owner_id,COUNT(m.telegram_id) AS members FROM clans c LEFT JOIN clan_members m ON m.clan_id=c.id WHERE (?='' OR lower(c.name) LIKE lower(?) OR lower(c.tag) LIKE lower(?)) GROUP BY c.id ORDER BY members DESC,c.created_at DESC LIMIT 30",q,q+"%",q+"%").toArray();
+        return Response.json({clans:rows.map(r=>({id:r.id,name:r.name,tag:r.tag,members:r.members,ownerId:r.owner_id}))});
+      }
+      if (path === "/social/clans/create" && request.method === "POST") {
+        const name=String(body.name||"").trim().slice(0,24),tag=String(body.tag||"").trim().toUpperCase().replace(/[^A-Z0-9]/g,"").slice(0,5);
+        if(name.length<3||tag.length<2)return Response.json({error:"Название: 3–24 символа, тег: 2–5 латинских букв/цифр"},{status:400});
+        const member=this.ctx.storage.sql.exec("SELECT clan_id FROM clan_members WHERE telegram_id=?",me).toArray()[0];
+        if(member)return Response.json({error:"Сначала покинь текущий клан"},{status:409});
+        const id=crypto.randomUUID();
+        try{this.ctx.storage.sql.exec("INSERT INTO clans (id,name,tag,owner_id,created_at) VALUES (?,?,?,?,?)",id,name,tag,me,now);this.ctx.storage.sql.exec("INSERT INTO clan_members (clan_id,telegram_id,role,joined_at) VALUES (?,?,'leader',?)",id,me,now);}
+        catch{return Response.json({error:"Тег уже занят или не удалось создать клан"},{status:409});}
+        return Response.json({ok:true,clan:{id,name,tag,ownerId:me,role:"leader",members:1}});
+      }
+      if (path === "/social/clans/join" && request.method === "POST") {
+        const id=String(body.clanId||"").slice(0,64),member=this.ctx.storage.sql.exec("SELECT clan_id FROM clan_members WHERE telegram_id=?",me).toArray()[0];
+        if(member)return Response.json({error:"Ты уже состоишь в клане"},{status:409});
+        const clan=this.ctx.storage.sql.exec("SELECT id FROM clans WHERE id=?",id).toArray()[0];
+        if(!clan)return Response.json({error:"Клан не найден"},{status:404});
+        const size=this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM clan_members WHERE clan_id=?",id).toArray()[0]?.n||0;
+        if(size>=50)return Response.json({error:"В клане уже 50 участников"},{status:409});
+        this.ctx.storage.sql.exec("INSERT INTO clan_members (clan_id,telegram_id,role,joined_at) VALUES (?,?,'member',?)",id,me,now);
+        return Response.json({ok:true});
+      }
+      if (path === "/social/clans/leave" && request.method === "POST") {
+        const membership=this.ctx.storage.sql.exec("SELECT clan_id,role FROM clan_members WHERE telegram_id=?",me).toArray()[0];
+        if(!membership)return Response.json({error:"Ты не состоишь в клане"},{status:404});
+        if(membership.role==="leader"){
+          const next=this.ctx.storage.sql.exec("SELECT telegram_id FROM clan_members WHERE clan_id=? AND telegram_id<>? ORDER BY joined_at LIMIT 1",membership.clan_id,me).toArray()[0];
+          if(next)this.ctx.storage.sql.exec("UPDATE clan_members SET role='leader' WHERE clan_id=? AND telegram_id=?",membership.clan_id,next.telegram_id);
+          else this.ctx.storage.sql.exec("DELETE FROM clans WHERE id=?",membership.clan_id);
+        }
+        this.ctx.storage.sql.exec("DELETE FROM clan_members WHERE clan_id=? AND telegram_id=?",membership.clan_id,me);
+        return Response.json({ok:true});
+      }
+      if (path === "/social/clans/invite" && request.method === "POST") {
+        const target=String(body.target||"").trim().replace(/^@/,"").slice(0,64);
+        const membership=this.ctx.storage.sql.exec("SELECT clan_id FROM clan_members WHERE telegram_id=?",me).toArray()[0];
+        if(!membership)return Response.json({error:"Сначала вступи в клан"},{status:409});
+        const targetUser=this.ctx.storage.sql.exec("SELECT telegram_id FROM users WHERE telegram_id=? OR lower(username)=lower(?) LIMIT 1",target,target).toArray()[0];
+        if(!targetUser||targetUser.telegram_id===me)return Response.json({error:"Игрок не найден"},{status:404});
+        if(this.ctx.storage.sql.exec("SELECT telegram_id FROM clan_members WHERE telegram_id=?",targetUser.telegram_id).toArray().length)return Response.json({error:"Игрок уже состоит в клане"},{status:409});
+        try{this.ctx.storage.sql.exec("INSERT INTO clan_invites (id,clan_id,from_id,to_id,status,created_at) VALUES (?,?,?,?,'pending',?)",crypto.randomUUID(),membership.clan_id,me,targetUser.telegram_id,now);}
+        catch{return Response.json({error:"Приглашение уже отправлено"},{status:409});}
+        return Response.json({ok:true});
+      }
+      if (path === "/social/clans/invite/respond" && request.method === "POST") {
+        const id=String(body.inviteId||"").slice(0,64),accept=body.accept===true;
+        const invite=this.ctx.storage.sql.exec("SELECT clan_id FROM clan_invites WHERE id=? AND to_id=? AND status='pending'",id,me).toArray()[0];
+        if(!invite)return Response.json({error:"Приглашение не найдено"},{status:404});
+        if(accept){
+          const member=this.ctx.storage.sql.exec("SELECT telegram_id FROM clan_members WHERE telegram_id=?",me).toArray()[0];
+          if(member)return Response.json({error:"Ты уже состоишь в клане"},{status:409});
+          const size=this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM clan_members WHERE clan_id=?",invite.clan_id).toArray()[0]?.n||0;
+          if(size>=50)return Response.json({error:"В клане уже 50 участников"},{status:409});
+          this.ctx.storage.sql.exec("INSERT INTO clan_members (clan_id,telegram_id,role,joined_at) VALUES (?,?,'member',?)",invite.clan_id,me,now);
+        }
+        this.ctx.storage.sql.exec("UPDATE clan_invites SET status=? WHERE id=? AND to_id=?",accept?"accepted":"declined",id,me);
+        return Response.json({ok:true});
+      }
+      return Response.json({error:"Not found"},{status:404});
     }
     const auth = request.headers.get("authorization") || "";
     const token = auth.replace(/^Bearer\s+/i, "");

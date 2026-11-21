@@ -404,6 +404,45 @@ background:rgba(10,10,12,.72);border-top:1px solid var(--line);backdrop-filter:b
 .stagePager{display:flex;gap:6px;overflow-x:auto;margin:0 0 14px;padding-bottom:6px;scrollbar-width:thin}.stagePager .btn{flex:0 0 auto}.stage .nm,.stage .mt{display:block}.stage.boss{box-shadow:0 0 0 1px #f2b63266,inset 0 0 24px #f2b63222}
 
 .historyRow{display:grid;grid-template-columns:minmax(0,1fr) auto 58px;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);font-size:12px}.historyRow:last-child{border-bottom:0}.historyWin{color:#78dfa2;font-weight:900;letter-spacing:.5px}.historyLoss{color:#ff9186;font-weight:900;letter-spacing:.5px}.historyRating{text-align:right;font-variant-numeric:tabular-nums}.skinVictory{position:relative;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;margin:14px auto 4px;padding:14px 18px;max-width:330px;border:1px solid rgba(255,255,255,.18);border-radius:16px;overflow:hidden;background:radial-gradient(circle at 50% 0%,var(--skinGlow),rgba(8,9,14,.5) 75%);animation:skinVictoryRise .65s cubic-bezier(.2,.8,.2,1) both}.skinVictory:before,.skinVictory:after{content:'';position:absolute;inset:8px;border:1px solid var(--skinGlow);border-radius:50%;opacity:.55;animation:skinVictoryPulse 2.1s ease-out infinite}.skinVictory:after{inset:18px;animation-delay:.45s}.skinVictory b,.skinVictory span,.skinVictoryOrb{position:relative;z-index:1}.skinVictory b{font-size:13px}.skinVictory span{font-size:10px;letter-spacing:1px;color:var(--skinGlow)}.skinVictoryOrb{font-size:30px;color:var(--skinGlow);text-shadow:0 0 20px var(--skinGlow);animation:skinVictorySpin 4s linear infinite}.skinVictory.rarity1{--skinGlow:#6ec9ff}.skinVictory.rarity2{--skinGlow:#b58cff}.skinVictory.rarity3{--skinGlow:#ffd36e}@keyframes skinVictoryRise{from{opacity:0;transform:translateY(14px) scale(.88)}to{opacity:1;transform:translateY(0) scale(1)}}@keyframes skinVictoryPulse{0%{transform:scale(.7);opacity:.65}100%{transform:scale(1.32);opacity:0}}@keyframes skinVictorySpin{to{transform:rotate(360deg)}}@media(max-width:520px){.historyRow{grid-template-columns:minmax(0,1fr) auto 42px;gap:7px}.historyRow b{font-size:11px}}
+/* ---------- социальный центр ---------- */
+.socialGrid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:start}
+.socialPanel{min-width:0;padding:20px}
+.socialPanelHead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.socialPanelHead h2{font:800 16px Unbounded,sans-serif;letter-spacing:1px}
+.socialCount{display:grid;place-items:center;min-width:34px;height:34px;padding:0 9px;border-radius:11px;background:linear-gradient(135deg,rgba(255,122,26,.24),rgba(255,176,102,.08));border:1px solid rgba(255,122,26,.3);color:var(--acc2);font:800 13px Unbounded}
+.socialForm{display:flex;gap:8px;align-items:center;margin:12px 0 16px;flex-wrap:wrap}
+.socialForm input{flex:1;min-width:120px;height:44px;padding:0 13px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:rgba(4,6,10,.72);color:var(--text);font:600 12px Manrope;outline:none}
+.socialForm input:focus{border-color:rgba(255,122,26,.65);box-shadow:0 0 0 3px rgba(255,122,26,.1)}
+.socialForm .btn{min-height:42px;padding:11px 14px;font-size:10px}
+.socialList{display:flex;flex-direction:column;gap:8px}
+.socialPerson,.clanListRow{display:flex;align-items:center;gap:11px;min-width:0;padding:11px;border:1px solid rgba(255,255,255,.09);border-radius:14px;background:linear-gradient(110deg,rgba(255,255,255,.045),rgba(255,255,255,.018));}
+.socialAvatar{width:38px;height:38px;flex:none;border-radius:12px;overflow:hidden;display:grid;place-items:center;background:linear-gradient(135deg,#55301a,#17191e);color:var(--acc2);font-size:18px}
+.socialAvatar img{width:100%;height:100%;object-fit:cover}
+.socialPersonInfo{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px}
+.socialPersonInfo b,.clanListRow b{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.socialPersonInfo small,.clanListRow small{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.socialOnline{font-size:8px;letter-spacing:1px;color:var(--good);font-weight:800}
+.socialActions{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.socialActions .btn{font-size:9px;padding:8px 10px;border-radius:10px}
+.socialSubhead{margin:20px 0 9px;font:800 10px Manrope,sans-serif;letter-spacing:1.5px;color:var(--acc2)}
+.socialEmpty,.socialPending{padding:13px;border:1px dashed rgba(255,255,255,.13);border-radius:12px;color:var(--muted);font-size:11px;line-height:1.6}
+.socialPending{margin-top:8px;border-style:solid}
+.clanCreate{padding:16px;border:1px solid rgba(255,122,26,.2);border-radius:16px;background:linear-gradient(135deg,rgba(255,122,26,.08),rgba(255,255,255,.02))}
+.clanCreate h3{font-size:12px;letter-spacing:1px;margin-bottom:5px}
+.clanBanner{display:flex;align-items:center;gap:12px;padding:15px;border:1px solid rgba(255,122,26,.28);border-radius:16px;background:radial-gradient(circle at 0 0,rgba(255,122,26,.17),transparent 70%),rgba(255,255,255,.025)}
+.clanMark{font:800 15px Unbounded;color:var(--acc2);white-space:nowrap}
+.clanInfo{flex:1;min-width:0}
+.clanInfo h2{font-size:13px;overflow-wrap:anywhere}
+.clanInfo span{display:block;color:var(--muted);font-size:9px;letter-spacing:1px;margin-top:5px}
+.clanListRow{justify-content:space-between}
+.clanListRow>div{display:flex;flex-direction:column;gap:4px;min-width:0}
+.clanListRow .btn{font-size:9px;padding:8px 11px}
+.socialFoot{margin-top:14px;color:var(--muted);font-size:10px;line-height:1.6;padding:0 4px}
+.socialLoading,.socialError{padding:24px;text-align:center;color:var(--muted);font-size:12px}
+.socialError .btn{display:flex;margin:14px auto 0}
+.btn:disabled{opacity:.48;filter:grayscale(.3);pointer-events:none}
+@media(max-width:900px){.socialGrid{grid-template-columns:1fr}#tabbar{grid-template-columns:repeat(7,minmax(0,1fr))}.socialPanel{padding:16px}}
+@media(max-width:520px){#tabbar{gap:3px;padding-left:5px;padding-right:5px}#tabbar button{padding:8px 2px;font-size:8px;letter-spacing:0}.socialPerson{align-items:flex-start;flex-wrap:wrap}.socialActions{width:100%;justify-content:flex-start}.socialActions .btn{flex:1}.clanBanner{flex-wrap:wrap}.clanBanner>.btn{margin-left:auto}.socialForm .btn{flex:1}}
 </style>
 </head>
 <body class="pc">
@@ -436,7 +475,8 @@ background:rgba(10,10,12,.72);border-top:1px solid var(--line);backdrop-filter:b
 <section class="screen" id="scr-team"></section>
 <section class="screen" id="scr-char"></section>
 <section class="screen" id="scr-profile"></section>
-        <section class="screen" id="scr-tasks"></section>
+        <section class="screen" id="scr-social"></section>
+<section class="screen" id="scr-tasks"></section>
 </div>
 </div>
 
@@ -2846,7 +2886,7 @@ if(prev==='battle'&&name!=='battle'){
 clearKeys();dragLook=false;
 if(document.pointerLockElement)document.exitPointerLock();
 }
-const inMenu=['menu','stages','arena','summon','team','char','profile','tasks'].includes(name);
+const inMenu=['menu','stages','arena','social','summon','team','char','profile','tasks'].includes(name);
 if(inMenu){
 // Keep the menu transition independent from optional 3D showcase refresh.
 try{resetLights();renderer.setClearColor(0x090a0d,0);}catch(e){console.error('Menu lighting:',e);}
@@ -2857,6 +2897,7 @@ document.querySelectorAll('#snav button,#tabbar button,.tbRight button[data-go]'
 if(name==='menu')renderMenu();
 if(name==='stages')renderStages();
 if(name==='arena')renderArena();
+if(name==='social')renderSocial();
 if(name==='team')renderTeam();
 if(name==='char')renderCharacterDetail(activeDetailId);
 if(name==='summon')renderSummon();
@@ -2876,9 +2917,53 @@ if(e.target.closest('.slot:not(.filled)'))say2('ВЫБЕРИ БОЙЦА НИЖЕ
 function renderCur(){$('#cCoins').textContent=state.coins;$('#cCry').textContent=state.crystals;$('#cRate').textContent=state.rating;}
 function say2(t){const el=$('#toast');el.textContent=t;el.style.opacity=1;clearTimeout(say2.t);say2.t=setTimeout(()=>el.style.opacity=0,1500);}
 /* ---------- nav ---------- */
-const NAV=[['menu','ОБЗОР',IC.user],['stages','КАМПАНИЯ',IC.flag],['arena','АРЕНА',IC.swords],['summon','ПРИЗЫВ',IC.star],['team','ОТРЯД',IC.users],['tasks','ЗАДАНИЯ',IC.check],['profile','ПРОФИЛЬ',IC.user]];
+const NAV=[['menu','ОБЗОР',IC.user],['stages','КАМПАНИЯ',IC.flag],['arena','АРЕНА',IC.swords],['social','СОЦИУМ',IC.users],['summon','ПРИЗЫВ',IC.star],['team','ОТРЯД',IC.users],['tasks','ЗАДАНИЯ',IC.check],['profile','ПРОФИЛЬ',IC.user]];
 $('#snav').innerHTML=NAV.map(x=>'<button data-go="'+x[0]+'">'+x[2]+'<span>'+x[1]+'</span></button>').join('');
-$('#tabbar').innerHTML=NAV.slice(0,6).map(x=>'<button data-go="'+x[0]+'">'+x[2]+'<span>'+x[1]+'</span></button>').join('');
+$('#tabbar').innerHTML=NAV.filter(x=>x[0]!=='profile').map(x=>'<button data-go="'+x[0]+'">'+x[2]+'<span>'+x[1]+'</span></button>').join('');
+/* ---------- social hub ---------- */
+function socialEsc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+async function socialRequest(path,body){
+ if(!cloudToken)throw new Error('Открой игру через Telegram, чтобы подключить аккаунт.');
+ const response=await fetch(CLOUD_API+'/api/social'+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json','authorization':'Bearer '+cloudToken},body:body===undefined?undefined:JSON.stringify(body)});
+ const data=await response.json().catch(()=>({}));
+ if(!response.ok)throw new Error(data.error||('Ошибка сервера: '+response.status));
+ return data;
+}
+async function renderSocial(){
+ const root=$('#scr-social');
+ root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья, кланы и приглашения игроков</div></div><span class="tag">TELEGRAM ONLINE</span></div><div class="socialLoading card glass">ЗАГРУЖАЕМ СОЦИАЛЬНЫЕ ДАННЫЕ…</div>';
+ if(!cloudToken){root.querySelector('.socialLoading').innerHTML='Для доступа к друзьям и кланам открой мини-приложение через своего Telegram-бота.';return;}
+ try{
+  const [data,clans]=await Promise.all([socialRequest('/'),socialRequest('/clans')]);
+  const friendRows=(data.friends||[]).map(u=>'<div class="socialPerson"><div class="socialAvatar">'+(u.photoUrl?'<img src="'+socialEsc(u.photoUrl)+'" alt="">':'<span>✦</span>')+'</div><div class="socialPersonInfo"><b>'+socialEsc(u.firstName||u.username||'Игрок')+'</b><small>'+(u.username?'@'+socialEsc(u.username):'ID '+socialEsc(u.id))+'</small></div><span class="socialOnline">ДРУГ</span></div>').join('')||'<div class="socialEmpty">Пока нет друзей. Найди игрока по Telegram ID или username.</div>';
+  const incoming=(data.incoming||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>'+socialEsc(x.user.firstName||x.user.username||'Игрок')+'</b><small>'+(x.user.username?'@'+socialEsc(x.user.username):'ID '+socialEsc(x.user.id))+'</small></div><div class="socialActions"><button class="btn primary" data-social-action="friend-accept" data-id="'+socialEsc(x.requestId)+'">ПРИНЯТЬ</button><button class="btn" data-social-action="friend-decline" data-id="'+socialEsc(x.requestId)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Новых заявок нет.</div>';
+  const outgoing=(data.outgoing||[]).map(x=>'<div class="socialPending">Ожидает ответа: '+socialEsc(x.user.firstName||x.user.username||x.user.id)+'</div>').join('');
+  const clan=data.clan?'<div class="clanBanner"><div class="clanMark">['+socialEsc(data.clan.tag)+']</div><div class="clanInfo"><h2>'+socialEsc(data.clan.name)+'</h2><span>'+data.clan.members+' УЧАСТНИКОВ · '+(data.clan.role==='leader'?'ГЛАВА':'УЧАСТНИК')+'</span></div><button class="btn" data-social-action="clan-leave">ПОКИНУТЬ</button></div><div class="socialForm"><input id="clanInviteTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="clan-invite">ПРИГЛАСИТЬ В КЛАН</button></div>':'<div class="clanCreate"><h3>СОЗДАТЬ КЛАН</h3><p class="mut">Собери команду и приглашай друзей.</p><div class="socialForm"><input id="clanName" maxlength="24" placeholder="Название клана"><input id="clanTag" maxlength="5" placeholder="ТЕГ"><button class="btn primary" data-social-action="clan-create">СОЗДАТЬ</button></div></div>';
+  const clanInv=(data.clanInvites||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>['+socialEsc(x.tag)+'] '+socialEsc(x.clanName)+'</b><small>Приглашение от '+socialEsc(x.from)+'</small></div><div class="socialActions"><button class="btn primary" data-social-action="clan-invite-accept" data-id="'+socialEsc(x.id)+'">ВСТУПИТЬ</button><button class="btn" data-social-action="clan-invite-decline" data-id="'+socialEsc(x.id)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Нет приглашений в кланы.</div>';
+  const clanRows=(clans.clans||[]).filter(c=>!data.clan||c.id!==data.clan.id).map(c=>'<div class="clanListRow"><div><b>['+socialEsc(c.tag)+'] '+socialEsc(c.name)+'</b><small>'+c.members+' / 50 участников</small></div>'+(data.clan?'':'<button class="btn" data-social-action="clan-join" data-id="'+socialEsc(c.id)+'">ВСТУПИТЬ</button>')+'</div>').join('')||'<div class="socialEmpty">Пока нет открытых кланов.</div>';
+  root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Играй вместе. Собирай команду. Создавай кланы.</div></div><span class="tag ok">АККАУНТ ПОДКЛЮЧЁН</span></div>'+
+  '<div class="socialGrid"><section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>ДРУЗЬЯ</h2><p class="mut">Добавление по Telegram ID или username</p></div><span class="socialCount">'+(data.friends||[]).length+'</span></div><div class="socialForm"><input id="friendTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="friend-add">ДОБАВИТЬ</button></div><div class="socialList">'+friendRows+'</div><div class="socialSubhead">ВХОДЯЩИЕ ЗАЯВКИ</div><div class="socialList">'+incoming+'</div>'+outgoing+'</section>'+
+  '<section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>КЛАНЫ</h2><p class="mut">Создай свой или вступи в существующий</p></div><span class="socialCount">'+(data.clan?'1':'0')+'</span></div>'+clan+'<div class="socialSubhead">ПРИГЛАШЕНИЯ</div><div class="socialList">'+clanInv+'</div><div class="socialSubhead">ОТКРЫТЫЕ КЛАНЫ</div><div class="socialList">'+clanRows+'</div></section></div>'+
+  '<div class="socialFoot">Поиск доступен среди игроков, которые уже запускали Intergalactic Wars через Telegram. Статус «в игре» пока не является индикатором присутствия в реальном времени.</div>';
+ }catch(error){root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья и кланы</div></div></div><div class="card glass socialError">'+socialEsc(error.message)+'<button class="btn" data-social-action="refresh">ПОВТОРИТЬ</button></div>';}
+}
+document.addEventListener('click',async e=>{
+ const b=e.target.closest('[data-social-action]');if(!b)return;
+ const action=b.dataset.socialAction,id=b.dataset.id;
+ const val=x=>document.getElementById(x)?.value?.trim()||'';
+ b.disabled=true;
+ try{
+  if(action==='refresh'){await renderSocial();return;}
+  if(action==='friend-add'){await socialRequest('/friends/request',{target:val('friendTarget')});say2('ЗАЯВКА ОТПРАВЛЕНА');}
+  else if(action==='friend-accept'||action==='friend-decline'){await socialRequest('/friends/respond',{requestId:id,accept:action==='friend-accept'});say2(action==='friend-accept'?'ДРУГ ДОБАВЛЕН':'ЗАЯВКА ОТКЛОНЕНА');}
+  else if(action==='clan-create'){await socialRequest('/clans/create',{name:val('clanName'),tag:val('clanTag')});say2('КЛАН СОЗДАН');}
+  else if(action==='clan-join'){await socialRequest('/clans/join',{clanId:id});say2('ТЫ ВСТУПИЛ В КЛАН');}
+  else if(action==='clan-leave'){await socialRequest('/clans/leave',{});say2('ТЫ ПОКИНУЛ КЛАН');}
+  else if(action==='clan-invite'){await socialRequest('/clans/invite',{target:val('clanInviteTarget')});say2('ПРИГЛАШЕНИЕ ОТПРАВЛЕНО');}
+  else if(action==='clan-invite-accept'||action==='clan-invite-decline'){await socialRequest('/clans/invite/respond',{inviteId:id,accept:action==='clan-invite-accept'});say2(action==='clan-invite-accept'?'ТЫ ВСТУПИЛ В КЛАН':'ПРИГЛАШЕНИЕ ОТКЛОНЕНО');}
+  await renderSocial();
+ }catch(error){say2(error.message||'ОШИБКА');b.disabled=false;}
+});
 /* ---------- menu ---------- */
 function renderTasks(){
  ensureDailyReset();ensureWeeklyReset();
