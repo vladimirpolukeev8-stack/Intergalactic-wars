@@ -3414,14 +3414,14 @@ function connectRankedOnline(options={}){
  const url=new URL('wss://intergalactic-wars-online.vladimirpolukeev8.workers.dev/ws');
  url.searchParams.set('playerId',playerId);url.searchParams.set('rating',String(Number(state.rating)||1000));url.searchParams.set('roster',JSON.stringify(own));
  if(options.ticket)url.searchParams.set('ticket',options.ticket);
- const ws=new WebSocket(url.toString());onlineSession.ws=ws;
+ const ws=new WebSocket(url.toString());onlineSession.ws=ws;let everMatched=false;
  ws.onmessage=(ev)=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
   if(m.type==='waiting'){say2('ПОИСК СОПЕРНИКА… РЕЙТИНГ '+m.rating);return;}
   if(m.type==='matched'){
    if(onlineSession.active)return;
    const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
    if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
-   onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
+   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
    say2('СОПЕРНИК НАЙДЕН · РЕЙТИНГ '+m.opponent.rating);
    startBattle({type:'ranked',idx:state.stage,wave:1,online:true,rankedOpponentRating:m.opponent.rating,rankedOpponentIds:opp});
    return;
@@ -3434,7 +3434,7 @@ function connectRankedOnline(options={}){
   if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('СОПЕРНИК ОТКЛЮЧИЛСЯ');}
  };
  ws.onerror=()=>say2('ОШИБКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ');
- ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
+ ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId&&!everMatched)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
 }
 function handleOnlineOpponentExit(message){
  if(!onlineSession.active)return;
