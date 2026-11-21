@@ -22,7 +22,7 @@ jobs:
     name: Deploy online matchmaking and social API
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Validate online Worker JavaScript
         run: node --check src/index.js
       - name: Verify Telegram token belongs to a valid bot (without exposing the token)
