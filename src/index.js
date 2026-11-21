@@ -1,7 +1,7 @@
 const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
-  "access-control-allow-methods": "GET, POST, OPTIONS",
+  "access-control-allow-methods": "GET, POST, PUT, OPTIONS",
   "access-control-allow-headers": "content-type, authorization, upgrade",
 };
 
@@ -21,8 +21,8 @@ async function verifyTelegramInitData(initData, botToken) {
   if (!/^[a-f0-9]{64}$/i.test(suppliedHash) || !Number.isFinite(authDate) || authDate > now + 60 || now - authDate > 86400) throw new Error("Expired or invalid Telegram session");
   const entries = [...params.entries()].filter(([key]) => key !== "hash").sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => key + "=" + value);
   const encoder = new TextEncoder();
-  const hmacKey = await crypto.subtle.importKey("raw", encoder.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const secret = await crypto.subtle.sign("HMAC", hmacKey, encoder.encode(botToken));
+  const hmacKey = await crypto.subtle.importKey("raw", encoder.encode(botToken), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const secret = await crypto.subtle.sign("HMAC", hmacKey, encoder.encode("WebAppData"));
   const dataKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const calculated = new Uint8Array(await crypto.subtle.sign("HMAC", dataKey, encoder.encode(entries.join("\n"))));
   const actual = [...calculated].map((v) => v.toString(16).padStart(2, "0")).join("");
