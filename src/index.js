@@ -103,7 +103,7 @@ export default {
 
     if (url.pathname.startsWith("/api/social")) {
       const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
-      const suffix = url.pathname.slice("/api/social".length) || "/";
+      const suffix = url.pathname.slice("/api/social".length);
       const raw = request.method === "GET" ? undefined : await request.text();
       if (raw && raw.length > 16384) return Response.json({ error: "Payload too large" }, { status: 413, headers: JSON_HEADERS });
       let body;
