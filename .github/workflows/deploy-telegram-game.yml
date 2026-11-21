@@ -25,6 +25,10 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v4
 
+      - name: Validate embedded game JavaScript
+        run: |
+          node -e "const fs=require('fs'); const html=fs.readFileSync('public/index.html','utf8'); const scripts=[...html.matchAll(/<script\\b[^>]*>([\\s\\S]*?)<\\/script>/gi)].map(x=>x[1]).filter(x=>x.trim()); if(!scripts.length) throw new Error('No inline game script found'); fs.writeFileSync('/tmp/igw-inline.js',scripts.join('\\n'));"
+          node --check /tmp/igw-inline.js
       - name: Deploy Telegram game Worker
         uses: cloudflare/wrangler-action@v4
         with:
