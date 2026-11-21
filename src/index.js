@@ -325,6 +325,8 @@ export class AccountStore {
       "CREATE TABLE IF NOT EXISTS profiles (telegram_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL);" +
       "CREATE TABLE IF NOT EXISTS friend_requests (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(from_id,to_id));" +
       "CREATE INDEX IF NOT EXISTS friend_to_status_idx ON friend_requests(to_id,status);" +
+      "CREATE TABLE IF NOT EXISTS battle_invites (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'ranked_duel', status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);" +
+      "CREATE INDEX IF NOT EXISTS battle_invites_to_status_idx ON battle_invites(to_id,status,created_at);" +
       "CREATE TABLE IF NOT EXISTS clans (id TEXT PRIMARY KEY, name TEXT NOT NULL, tag TEXT NOT NULL UNIQUE, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL);" +
       "CREATE TABLE IF NOT EXISTS clan_members (clan_id TEXT NOT NULL, telegram_id TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', joined_at INTEGER NOT NULL, PRIMARY KEY(clan_id,telegram_id));" +
       "CREATE TABLE IF NOT EXISTS clan_invites (id TEXT PRIMARY KEY, clan_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, UNIQUE(clan_id,to_id));"
@@ -378,7 +380,9 @@ export class AccountStore {
         const clanRow = this.ctx.storage.sql.exec("SELECT c.id,c.name,c.tag,c.owner_id,m.role,(SELECT COUNT(*) FROM clan_members cm WHERE cm.clan_id=c.id) AS members FROM clan_members m JOIN clans c ON c.id=m.clan_id WHERE m.telegram_id=?",me).toArray()[0] || null;
         const clan = clanRow ? {id:clanRow.id,name:clanRow.name,tag:clanRow.tag,ownerId:clanRow.owner_id,role:clanRow.role,members:clanRow.members} : null;
         const clanInvites = this.ctx.storage.sql.exec("SELECT i.id,c.name,c.tag,u.username,u.first_name FROM clan_invites i JOIN clans c ON c.id=i.clan_id JOIN users u ON u.telegram_id=i.from_id WHERE i.to_id=? AND i.status='pending' ORDER BY i.created_at DESC",me).toArray().map(r=>({id:r.id,clanName:r.name,tag:r.tag,from:r.username||r.first_name||"Игрок"}));
-        return Response.json({friends,incoming,outgoing,clan,clanInvites});
+        const battleInvites=this.ctx.storage.sql.exec("SELECT i.id,i.mode,i.created_at,u.telegram_id,u.username,u.first_name FROM battle_invites i JOIN users u ON u.telegram_id=i.from_id WHERE i.to_id=? AND i.status='pending' AND i.created_at>? ORDER BY i.created_at DESC LIMIT 20",me,now-120000).toArray().map(r=>({id:r.id,mode:r.mode,createdAt:r.created_at,from:userCard(r)}));
+        const outgoingBattleInvites=this.ctx.storage.sql.exec("SELECT i.id,i.mode,i.status,i.created_at,u.telegram_id,u.username,u.first_name FROM battle_invites i JOIN users u ON u.telegram_id=i.to_id WHERE i.from_id=? AND i.status='pending' AND i.created_at>? ORDER BY i.created_at DESC LIMIT 20",me,now-120000).toArray().map(r=>({id:r.id,mode:r.mode,createdAt:r.created_at,to:userCard(r)}));
+        return Response.json({friends,incoming,outgoing,clan,clanInvites,battleInvites,outgoingBattleInvites});
       }
       if (path === "/social/friends/request" && request.method === "POST") {
         const target = String(body.target || "").trim().replace(/^@/,"").slice(0,64);
@@ -390,6 +394,27 @@ export class AccountStore {
         if(existing){if(existing.status==="accepted")return Response.json({error:"Вы уже друзья"},{status:409});return Response.json({error:"Заявка уже существует"},{status:409});}
         this.ctx.storage.sql.exec("INSERT INTO friend_requests (id,from_id,to_id,status,created_at,updated_at) VALUES (?,?,?,'pending',?,?)",crypto.randomUUID(),me,targetUser.telegram_id,now,now);
         return Response.json({ok:true});
+      }
+      if (path === "/social/battle-invites" && request.method === "POST") {
+        const target=String(body.target||"").trim().slice(0,80);
+        const mode=String(body.mode||"ranked_duel");
+        if(!/^[0-9]{1,24}$/.test(target)||!["ranked_duel","boss_coop"].includes(mode))return Response.json({error:"Некорректный игрок или режим"},{status:400});
+        if(target===me)return Response.json({error:"Нельзя пригласить самого себя"},{status:400});
+        const friend=this.ctx.storage.sql.exec("SELECT id FROM friend_requests WHERE status='accepted' AND ((from_id=? AND to_id=?) OR (from_id=? AND to_id=?))",me,target,target,me).toArray()[0];
+        if(!friend)return Response.json({error:"Приглашать в бой можно только друзей"},{status:403});
+        const recent=this.ctx.storage.sql.exec("SELECT id FROM battle_invites WHERE from_id=? AND to_id=? AND status='pending' AND created_at>?",me,target,now-120000).toArray()[0];
+        if(recent)return Response.json({error:"Приглашение уже ожидает ответа"},{status:409});
+        const id=crypto.randomUUID();
+        this.ctx.storage.sql.exec("INSERT INTO battle_invites (id,from_id,to_id,mode,status,created_at,updated_at) VALUES (?,?,?,?,'pending',?,?)",id,me,target,mode,now,now);
+        return Response.json({ok:true,inviteId:id,expiresAt:now+120000});
+      }
+      if (path === "/social/battle-invites/respond" && request.method === "POST") {
+        const id=String(body.inviteId||"").slice(0,64),accept=body.accept===true;
+        const invite=this.ctx.storage.sql.exec("SELECT id,from_id,mode,created_at FROM battle_invites WHERE id=? AND to_id=? AND status='pending'",id,me).toArray()[0];
+        if(!invite)return Response.json({error:"Приглашение уже недействительно"},{status:404});
+        if(invite.created_at<now-120000){this.ctx.storage.sql.exec("UPDATE battle_invites SET status='expired',updated_at=? WHERE id=?",now,id);return Response.json({error:"Время приглашения истекло"},{status:410});}
+        this.ctx.storage.sql.exec("UPDATE battle_invites SET status=?,updated_at=? WHERE id=? AND to_id=? AND status='pending'",accept?"accepted":"declined",now,id,me);
+        return Response.json({ok:true,accepted:accept,mode:invite.mode,fromId:invite.from_id,inviteId:id});
       }
       if (path === "/social/friends/respond" && request.method === "POST") {
         const id=String(body.requestId||"").slice(0,64), accept=body.accept===true;
