@@ -1067,14 +1067,18 @@ function queueCloudProfileSave(){
 function save(){try{state._cloudUpdatedAt=Date.now();localStorage.setItem('igw4',JSON.stringify(state));}catch(e){}queueCloudProfileSave();}
 async function initializeTelegramAccount(){
  const tg=window.Telegram&&window.Telegram.WebApp;
- if(!tg||!tg.initData)return;
+ if(!tg){window.__igwAccountStatus='telegram_sdk_missing';window.__igwAuthError='Не загрузился Telegram WebApp SDK. Закрой мини-приложение и открой его заново из бота.';return;}
+ tg.ready();tg.expand();
+ const initData=tg.initData||'';
+ if(!initData){window.__igwAccountStatus='init_data_missing';window.__igwAuthError='Telegram не передал данные запуска. Открой именно кнопку мини-приложения в чате с ботом, а не обычную ссылку.';return;}
  try{
-  tg.ready();tg.expand();
-  const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData:tg.initData})});
-  if(!auth.ok)throw new Error('Telegram auth failed: '+auth.status);
-  const authData=await auth.json();cloudToken=authData.token;
+  const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData})});
+  const authData=await auth.json().catch(()=>({}));
+  if(!auth.ok)throw new Error(authData.error||('Ошибка авторизации Telegram: HTTP '+auth.status));
+  if(!authData.token)throw new Error('Сервер авторизации не выдал сессию. Проверь настройку Telegram Bot Token в онлайн Worker.');
+  cloudToken=authData.token;
   const response=await fetch(CLOUD_API+'/api/profile',{headers:{'authorization':'Bearer '+cloudToken}});
-  if(!response.ok)throw new Error('Cloud profile read failed: '+response.status);
+  if(!response.ok)throw new Error('Не удалось загрузить профиль: HTTP '+response.status);
   const remote=await response.json();
   if(remote.profile&&typeof remote.profile==='object'){
    const cloudTime=Number(remote.updatedAt)||0;
@@ -1084,20 +1088,15 @@ async function initializeTelegramAccount(){
     localStorage.setItem('igw4',JSON.stringify(state));
     const marker='igw_cloud_restore_reload';
     if(sessionStorage.getItem(marker)!==String(cloudTime)){sessionStorage.setItem(marker,String(cloudTime));location.reload();return;}
-   }else{
-    await putCloudProfile();
-   }
-  }else{
-   await putCloudProfile();
-  }
-  cloudSyncReady=true;
-  startSocialPresence();
-  window.__igwAccount=authData.user;
-  window.__igwAccountStatus='connected';
+   }else{await putCloudProfile();}
+  }else{await putCloudProfile();}
+  cloudSyncReady=true;startSocialPresence();
+  window.__igwAccount=authData.user;window.__igwAccountStatus='connected';window.__igwAuthError='';
  }catch(error){
-  window.__igwAccountStatus='offline';
+  cloudToken=null;cloudSyncReady=false;window.__igwAccountStatus='offline';
+  window.__igwAuthError=String(error&&error.message||'Неизвестная ошибка авторизации');
   console.warn('Telegram account/cloud sync:',error);
- }
+ } 
 }
 
 function rng(seed){let a=seed>>>0;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -2909,6 +2908,7 @@ renderCur();
 window.go=show;
 document.addEventListener('click',e=>{
 if(curScreen!=='battle'&&e.target.closest('button'))SND.sfx('click');
+const retry=e.target.closest('[data-social-retry]');if(retry){retry.disabled=true;retry.textContent='ПРОВЕРЯЕМ…';initializeTelegramAccount().then(()=>renderSocial()).catch(()=>renderSocial());return;}
 const g=e.target.closest('[data-go]');if(g){show(g.dataset.go);return;}
 const ranked=e.target.closest('[data-ranked-start]');if(ranked){startRankedMatch();return;}
 const gm=e.target.closest('[data-mode-start]');if(gm){if(!state.team.some(id=>id&&byId(id))){say2('СОБЕРИ ОТРЯД');show('team');return;}startBattle({type:gm.dataset.modeStart,idx:state.stage,wave:1});return;}
@@ -2924,7 +2924,7 @@ $('#tabbar').innerHTML=NAV.filter(x=>x[0]!=='profile').map(x=>'<button data-go="
 /* ---------- social hub ---------- */
 function socialEsc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function socialRequest(path,body){
- if(!cloudToken)throw new Error('Открой игру через Telegram, чтобы подключить аккаунт.');
+ if(!cloudToken)throw new Error(window.__igwAuthError||'Аккаунт Telegram не подключён. Перезапусти мини-приложение из бота.');
  const response=await fetch(CLOUD_API+'/api/social'+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json','authorization':'Bearer '+cloudToken},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await response.json().catch(()=>({}));
  if(!response.ok)throw new Error(data.error||('Ошибка сервера: '+response.status));
@@ -2962,7 +2962,7 @@ function startSocialPresence(){if(socialPresenceTimer)return;heartbeatPresence()
 async function renderSocial(){
  const root=$('#scr-social');
  root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья, кланы и приглашения игроков</div></div><span class="tag">TELEGRAM ONLINE</span></div><div class="socialLoading card glass">ЗАГРУЖАЕМ СОЦИАЛЬНЫЕ ДАННЫЕ…</div>';
- if(!cloudToken){root.querySelector('.socialLoading').innerHTML='Для доступа к друзьям и кланам открой мини-приложение через своего Telegram-бота.';return;}
+ if(!cloudToken){const reason=socialEsc(window.__igwAuthError||'Аккаунт Telegram ещё не подключён.');root.querySelector('.socialLoading').innerHTML='<b>НЕ УДАЛОСЬ ПОДКЛЮЧИТЬ АККАУНТ</b><div class="mut" style="margin:8px 0 14px">'+reason+'</div><button class="btn primary" data-social-retry>ПОВТОРИТЬ АВТОРИЗАЦИЮ</button>';return;}
  try{
   const [data,clans]=await Promise.all([socialRequest('/'),socialRequest('/clans')]);
   const friendRows=(data.friends||[]).map(u=>'<div class="socialPerson"><div class="socialAvatar">'+(u.photoUrl?'<img src="'+socialEsc(u.photoUrl)+'" alt="">':'<span>✦</span>')+'</div><div class="socialPersonInfo"><b>'+socialEsc(u.firstName||u.username||'Игрок')+'</b><small>'+(u.username?'@'+socialEsc(u.username):'ID '+socialEsc(u.id))+'</small></div><div class="socialActions"><span class="socialOnline '+(u.online?'':'offline')+'" data-friend-id="'+socialEsc(u.id)+'">'+(u.online?'В СЕТИ':'НЕ В СЕТИ')+'</span><button class="btn" data-social-action="battle-invite" data-id="'+socialEsc(u.id)+'">В БОЙ</button></div></div>').join('')||'<div class="socialEmpty">Пока нет друзей. Найди игрока по Telegram ID или username.</div>';
