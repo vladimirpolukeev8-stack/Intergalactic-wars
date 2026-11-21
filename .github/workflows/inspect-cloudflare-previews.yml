@@ -2,6 +2,9 @@ name: Inspect Cloudflare Preview settings
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -23,7 +26,6 @@ jobs:
             exit 1
           fi
 
-          # Remove accidental spaces/newlines from the Account ID secret.
           CF_ACCOUNT_ID="$(printf '%s' "$CF_ACCOUNT_ID" | tr -d '[:space:]')"
           if [[ ! "$CF_ACCOUNT_ID" =~ ^[a-fA-F0-9]{32}$ ]]; then
             echo "::error::CLOUDFLARE_ACCOUNT_ID must be exactly 32 hexadecimal characters. Check the GitHub secret."
