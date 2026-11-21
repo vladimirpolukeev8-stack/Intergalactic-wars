@@ -2,13 +2,51 @@ const JSON_HEADERS = {
   "content-type": "application/json; charset=utf-8",
   "access-control-allow-origin": "*",
   "access-control-allow-methods": "GET, POST, OPTIONS",
-  "access-control-allow-headers": "content-type, upgrade",
+  "access-control-allow-headers": "content-type, authorization, upgrade",
 };
 
 const QUEUE_MODES = new Set(["ranked_duel", "boss_coop"]);
 
 function ratingWindow(rating) {
   return Math.min(500, 100 + Math.floor(Math.max(0, rating) / 500) * 50);
+}
+
+
+async function verifyTelegramInitData(initData, botToken) {
+  if (typeof initData !== "string" || initData.length < 1 || initData.length > 12000) throw new Error("Invalid Telegram initData");
+  const params = new URLSearchParams(initData);
+  const suppliedHash = params.get("hash") || "";
+  const authDate = Number(params.get("auth_date") || 0);
+  const now = Math.floor(Date.now() / 1000);
+  if (!/^[a-f0-9]{64}$/i.test(suppliedHash) || !Number.isFinite(authDate) || authDate > now + 60 || now - authDate > 86400) throw new Error("Expired or invalid Telegram session");
+  const entries = [...params.entries()].filter(([key]) => key !== "hash").sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => key + "=" + value);
+  const encoder = new TextEncoder();
+  const hmacKey = await crypto.subtle.importKey("raw", encoder.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const secret = await crypto.subtle.sign("HMAC", hmacKey, encoder.encode(botToken));
+  const dataKey = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const calculated = new Uint8Array(await crypto.subtle.sign("HMAC", dataKey, encoder.encode(entries.join("\n"))));
+  const actual = [...calculated].map((v) => v.toString(16).padStart(2, "0")).join("");
+  let mismatch = actual.length ^ suppliedHash.length;
+  for (let i = 0; i < Math.max(actual.length, suppliedHash.length); i++) mismatch |= (actual.charCodeAt(i) || 0) ^ (suppliedHash.toLowerCase().charCodeAt(i) || 0);
+  if (mismatch !== 0) throw new Error("Telegram signature verification failed");
+  let user;
+  try { user = JSON.parse(params.get("user") || "null"); } catch { user = null; }
+  if (!user || !Number.isSafeInteger(Number(user.id)) || Number(user.id) <= 0) throw new Error("Telegram user is missing");
+  return {
+    id: String(user.id),
+    username: typeof user.username === "string" ? user.username.slice(0, 64) : "",
+    firstName: typeof user.first_name === "string" ? user.first_name.slice(0, 128) : "",
+    lastName: typeof user.last_name === "string" ? user.last_name.slice(0, 128) : "",
+    photoUrl: typeof user.photo_url === "string" ? user.photo_url.slice(0, 2048) : "",
+  };
+}
+async function accountRequest(env, path, method, body, token) {
+  const id = env.ACCOUNT_STORE.idFromName("global-account-store");
+  const headers = new Headers({ "content-type": "application/json" });
+  if (token) headers.set("authorization", "Bearer " + token);
+  return env.ACCOUNT_STORE.get(id).fetch("https://account.internal" + path, {
+    method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
 
 export default {
@@ -24,7 +62,8 @@ export default {
         {
           ok: true,
           service: "intergalactic-wars-matchmaker",
-          version: 2,
+          version: 3,
+          telegramAccounts: true,
           queues: {
             ranked_duel: { playersPerMatch: 2, rosterPerPlayer: 3 },
             boss_coop: { playersPerMatch: 3, rosterPerPlayer: 1 },
@@ -32,6 +71,34 @@ export default {
         },
         { headers: JSON_HEADERS },
       );
+    }
+
+
+    if (url.pathname === "/api/auth/telegram" && request.method === "POST") {
+      if (!env.TELEGRAM_BOT_TOKEN) return Response.json({ error: "Telegram authentication is not configured" }, { status: 503, headers: JSON_HEADERS });
+      try {
+        const body = await request.json();
+        const user = await verifyTelegramInitData(body?.initData, env.TELEGRAM_BOT_TOKEN);
+        const result = await accountRequest(env, "/session/create", "POST", { user });
+        return new Response(result.body, { status: result.status, headers: JSON_HEADERS });
+      } catch (error) {
+        return Response.json({ error: error.message || "Telegram authentication failed" }, { status: 401, headers: JSON_HEADERS });
+      }
+    }
+    if (url.pathname === "/api/me" || url.pathname === "/api/profile") {
+      if (!["GET", "PUT"].includes(request.method)) return Response.json({ error: "Method not allowed" }, { status: 405, headers: JSON_HEADERS });
+      const token = (request.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+      if (url.pathname === "/api/profile" && request.method === "PUT") {
+        const raw = await request.text();
+        if (raw.length > 524288) return Response.json({ error: "Profile payload too large" }, { status: 413, headers: JSON_HEADERS });
+        let body;
+        try { body = JSON.parse(raw); } catch { return Response.json({ error: "Invalid JSON" }, { status: 400, headers: JSON_HEADERS }); }
+        const result = await accountRequest(env, "/profile", "PUT", body, token);
+        return new Response(result.body, { status: result.status, headers: JSON_HEADERS });
+      }
+      const path = url.pathname === "/api/me" ? "/me" : "/profile";
+      const result = await accountRequest(env, path, "GET", undefined, token);
+      return new Response(result.body, { status: result.status, headers: JSON_HEADERS });
     }
 
     if (url.pathname === "/ws") {
@@ -232,5 +299,66 @@ export class Matchmaker {
         peer.serializeAttachment({ ...peerData, status: "finished" });
       }
     }
+  }
+}
+
+
+export class AccountStore {
+  constructor(ctx) {
+    this.ctx = ctx;
+    this.ctx.storage.sql.exec(
+      "CREATE TABLE IF NOT EXISTS users (telegram_id TEXT PRIMARY KEY, username TEXT NOT NULL DEFAULT '', first_name TEXT NOT NULL DEFAULT '', last_name TEXT NOT NULL DEFAULT '', photo_url TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);" +
+      "CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, telegram_id TEXT NOT NULL, expires_at INTEGER NOT NULL);" +
+      "CREATE INDEX IF NOT EXISTS sessions_expiry_idx ON sessions(expires_at);" +
+      "CREATE TABLE IF NOT EXISTS profiles (telegram_id TEXT PRIMARY KEY, data_json TEXT NOT NULL, updated_at INTEGER NOT NULL);"
+    );
+  }
+  async fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === "/session/create" && request.method === "POST") {
+      const body = await request.json();
+      const user = body?.user;
+      if (!user || !/^\d{1,24}$/.test(String(user.id))) return Response.json({ error: "Invalid user" }, { status: 400 });
+      const now = Date.now();
+      const existing = this.ctx.storage.sql.exec("SELECT telegram_id FROM users WHERE telegram_id = ?", String(user.id)).toArray()[0];
+      this.ctx.storage.sql.exec(
+        "INSERT INTO users (telegram_id, username, first_name, last_name, photo_url, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT(telegram_id) DO UPDATE SET username=excluded.username, first_name=excluded.first_name, last_name=excluded.last_name, photo_url=excluded.photo_url, updated_at=excluded.updated_at",
+        String(user.id), user.username || "", user.firstName || "", user.lastName || "", user.photoUrl || "", now, now
+      );
+      const rawToken = new Uint8Array(32);
+      crypto.getRandomValues(rawToken);
+      const token = btoa(String.fromCharCode(...rawToken)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+      const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+      const tokenHash = [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join("");
+      const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
+      this.ctx.storage.sql.exec("INSERT INTO sessions (token_hash, telegram_id, expires_at) VALUES (?, ?, ?)", tokenHash, String(user.id), expiresAt);
+      return Response.json({ token, expiresAt, user: { id: String(user.id), username: user.username || "", firstName: user.firstName || "", lastName: user.lastName || "", photoUrl: user.photoUrl || "" }, isNew: !existing });
+    }
+    const auth = request.headers.get("authorization") || "";
+    const token = auth.replace(/^Bearer\s+/i, "");
+    if (!token || token.length > 256) return Response.json({ error: "Unauthorized" }, { status: 401 });
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(token));
+    const tokenHash = [...new Uint8Array(digest)].map((v) => v.toString(16).padStart(2, "0")).join("");
+    const session = this.ctx.storage.sql.exec("SELECT telegram_id FROM sessions WHERE token_hash = ? AND expires_at > ?", tokenHash, Date.now()).toArray()[0];
+    if (!session) return Response.json({ error: "Session expired" }, { status: 401 });
+    if (url.pathname === "/me" && request.method === "GET") {
+      const user = this.ctx.storage.sql.exec("SELECT telegram_id, username, first_name, last_name, photo_url, created_at, updated_at FROM users WHERE telegram_id = ?", session.telegram_id).toArray()[0];
+      return Response.json({ user: user ? { id: user.telegram_id, username: user.username, firstName: user.first_name, lastName: user.last_name, photoUrl: user.photo_url, createdAt: user.created_at, updatedAt: user.updated_at } : null });
+    }
+    if (url.pathname === "/profile" && request.method === "GET") {
+      const row = this.ctx.storage.sql.exec("SELECT data_json, updated_at FROM profiles WHERE telegram_id = ?", session.telegram_id).toArray()[0];
+      return Response.json({ profile: row ? JSON.parse(row.data_json) : null, updatedAt: row?.updated_at || 0 });
+    }
+    if (url.pathname === "/profile" && request.method === "PUT") {
+      const body = await request.json();
+      if (!body || typeof body !== "object" || Array.isArray(body) || !body.state || typeof body.state !== "object" || Array.isArray(body.state)) return Response.json({ error: "Invalid profile state" }, { status: 400 });
+      const data = JSON.stringify(body.state);
+      if (data.length > 524288) return Response.json({ error: "Profile payload too large" }, { status: 413 });
+      const now = Date.now();
+      this.ctx.storage.sql.exec("INSERT INTO profiles (telegram_id, data_json, updated_at) VALUES (?, ?, ?) ON CONFLICT(telegram_id) DO UPDATE SET data_json=excluded.data_json, updated_at=excluded.updated_at", session.telegram_id, data, now);
+      return Response.json({ ok: true, updatedAt: now });
+    }
+    return Response.json({ error: "Not found" }, { status: 404 });
   }
 }
