@@ -1067,10 +1067,10 @@ function queueCloudProfileSave(){
 function save(){try{state._cloudUpdatedAt=Date.now();localStorage.setItem('igw4',JSON.stringify(state));}catch(e){}queueCloudProfileSave();}
 async function initializeTelegramAccount(){
  const tg=window.Telegram&&window.Telegram.WebApp;
- if(!tg){window.__igwAccountStatus='telegram_sdk_missing';window.__igwAuthError='Не загрузился Telegram WebApp SDK. Закрой мини-приложение и открой его заново из бота.';return;}
+ if(!tg){window.__igwAccountStatus='telegram_sdk_missing';window.__igwAuthError='Не загрузился Telegram WebApp SDK. Закрой мини-приложение и открой его заново из бота.';if(curScreen==='social')renderSocial();return;}
  tg.ready();tg.expand();
  const initData=tg.initData||'';
- if(!initData){window.__igwAccountStatus='init_data_missing';window.__igwAuthError='Telegram не передал данные запуска. Открой именно кнопку мини-приложения в чате с ботом, а не обычную ссылку.';return;}
+ if(!initData){window.__igwAccountStatus='init_data_missing';window.__igwAuthError='Telegram не передал данные запуска. Открой именно кнопку мини-приложения в чате с ботом, а не обычную ссылку.';if(curScreen==='social')renderSocial();return;}
  try{
   const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData})});
   const authData=await auth.json().catch(()=>({}));
@@ -1092,10 +1092,12 @@ async function initializeTelegramAccount(){
   }else{await putCloudProfile();}
   cloudSyncReady=true;startSocialPresence();
   window.__igwAccount=authData.user;window.__igwAccountStatus='connected';window.__igwAuthError='';
+  if(curScreen==='social')renderSocial();
  }catch(error){
   cloudToken=null;cloudSyncReady=false;window.__igwAccountStatus='offline';
   window.__igwAuthError=String(error&&error.message||'Неизвестная ошибка авторизации');
   console.warn('Telegram account/cloud sync:',error);
+  if(curScreen==='social')renderSocial();
  } 
 }
 
