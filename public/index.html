@@ -3574,6 +3574,10 @@ if(cfg.online&&cfg.type==='royale'){
  // The six queued human players are the entire free-for-all lobby.
 }else if(cfg.online&&Array.isArray(cfg.onlineOpponentIds)){
  // The opponent roster was created from the matched player's account.
+}else if(cfg.online&&cfg.type==='royale'){
+ // All opposing slots are filled by real players in the six-player queue.
+}else if(cfg.online&&Array.isArray(cfg.onlineOpponentIds)){
+ // PvP opponent roster is already instantiated above.
 }else if(cfg.type==='stage'){
  const pool=CHARS.filter(c=>c.rar>=sc.minR&&c.rar<=sc.maxR);
  const r2=rng(curLv.seed+5),md=curLv.mod;
@@ -3656,8 +3660,18 @@ function advanceModeWave(){
   units.filter(u=>u.team!=='player'&&!u.alive).forEach(u=>{unitsG.remove(u.mesh);if(u.bar)u.bar.remove();});
   units=units.filter(u=>u.team==='player'||u.alive);
   battleCfg.wave=(battleCfg.wave||1)+1;
-  const sc=stageCfg(battleCfg.idx);spawnModeEnemies(battleCfg,curLv,sc);formUp('enemy');buildEnemyPorts();
-  battleOver=false;banner((battleCfg.type==='survival'?'ВОЛНА ':'РАУНД ')+battleCfg.wave,'ПРОТИВНИКИ УСИЛЕНЫ · СОХРАНИ ЗДОРОВЬЕ');
+  if(battleCfg.online&&Array.isArray(battleCfg.onlineOpponentIds)){
+   onlineSession.remoteUnits=[];
+   const enemyIndex=onlineSession.teamIndex===0?1:0;
+   battleCfg.onlineOpponentIds.map(byId).filter(Boolean).slice(0,3).forEach((def,i)=>{
+    const u=makeUnit(def,'enemy',1);u.netRemote=true;u.netTeamIndex=enemyIndex;u.netUnitIndex=i;units.push(u);onlineSession.remoteUnits.push(u);
+   });
+   onlineSession.remoteUnitsByTeam[enemyIndex]=onlineSession.remoteUnits;
+  }else{
+   const sc=stageCfg(battleCfg.idx);spawnModeEnemies(battleCfg,curLv,sc);
+  }
+  formUp('enemy');buildEnemyPorts();
+  battleOver=false;banner((battleCfg.type==='survival'?'ВОЛНА ':'РАУНД ')+battleCfg.wave,'ПРОТИВНИКИ УСИЛЕНЫ · ЗДОРОВЬЕ СОХРАНЕНО');
  },1100);
 }
 function roleOf(u){return u.role;}
