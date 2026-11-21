@@ -3463,28 +3463,29 @@ function connectRankedOnline(options={}){
     else if(!e.targetType)t=units.filter(u=>u.team==='player'&&!u.netRemote)[Math.max(0,Math.min(2,e.target|0))];
     if(t&&t.alive){t.hp=Math.max(0,t.hp-Math.max(0,Number(e.damage)||0));if(t.hp<=0){t.hp=0;t.alive=false;t.deathT=0;if(t.bar)t.bar.style.display='none';checkEnd();}}
    }
-   if(e.type==='leave'){handleOnlineOpponentExit('СОПЕРНИК ПОКИНУЛ БОЙ');}
+   if(e.type==='leave'){handleOnlineOpponentExit('ИГРОК ПОКИНУЛ БОЙ',m.teamIndex);}
   }
   if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('ИГРОК ОТКЛЮЧИЛСЯ',m.teamIndex);}
  };
  ws.onerror=()=>say2('ОШИБКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ');
  ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId&&!everMatched)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
 }
-function handleOnlineOpponentExit(message){
+function handleOnlineOpponentExit(message,teamIndex){
  if(!onlineSession.active)return;
- say2(message||'СОПЕРНИК ОТКЛЮЧИЛСЯ');
- if(mode==='battle'&&battleCfg&&battleCfg.online&&battleCfg.type==='ranked'){
-  onlineSession.remoteUnits.forEach(u=>{if(!u)return;u.hp=0;u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';});
-  checkEnd();
- }else{
-  onlineSession.active=false;onlineSession.remoteUnits=[];
- }
+ say2(message||'ИГРОК ОТКЛЮЧИЛСЯ');
+ const targets=Number.isInteger(Number(teamIndex))?(onlineSession.remoteUnitsByTeam[Number(teamIndex)]||[]):onlineSession.remoteUnits;
+ targets.forEach(u=>{if(!u)return;u.hp=0;u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';});
+ checkEnd();
 }
 function sendOnlineSnapshot(now){
  if(!onlineSession.active||!onlineSession.ws||onlineSession.ws.readyState!==WebSocket.OPEN||now-onlineSession.lastSend<60)return;
  onlineSession.lastSend=now;
- const own=units.filter(u=>u.team==='player');
- netSend({type:'snapshot',units:own.map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}))});
+ const own=units.filter(u=>u.team==='player'&&!u.netRemote);
+ const packet={type:'snapshot',units:own.map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}))};
+ if(battleCfg&&battleCfg.coop&&onlineSession.teamIndex===0){
+  packet.enemyUnits=units.filter(u=>u.team==='enemy'&&!u.netRemote).map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}));
+ }
+ netSend(packet);
 }
 
 let TELE=[];const tele=(x,z,r,ms,team)=>TELE.push({x,z,r,t:performance.now()+ms,team});
@@ -3807,7 +3808,11 @@ if(src&&src.team==='player'&&opts.basicAttack){
  if(src.comboCount===3){comboMilestone=3;dmg*=1.04;}else if(src.comboCount===5){comboMilestone=5;dmg*=1.07;}else if(src.comboCount===8){comboMilestone=8;dmg*=1.1;}
  state.attacks=(state.attacks||0)+1;updateTaskProgress('attack');
 }
-if(onlineSession.active&&battleCfg&&battleCfg.online&&src&&src.team==='player'&&tgt.team==='enemy'){const ti=onlineSession.remoteUnits.indexOf(tgt);if(ti>=0)netSend({type:'hit',target:ti,damage:dmg});}
+if(onlineSession.active&&battleCfg&&battleCfg.online&&src){
+ if(tgt.netRemote)netSend({type:'hit',targetType:'player',targetTeamIndex:tgt.netTeamIndex,targetUnitIndex:tgt.netUnitIndex||0,damage:dmg});
+ else if(battleCfg.coop&&src.team==='player'&&tgt.team==='enemy'){const ti=units.filter(u=>u.team==='enemy'&&!u.netRemote).indexOf(tgt);if(ti>=0)netSend({type:'hit',targetType:'enemy',target:ti,damage:dmg});}
+}
+if(onlineSession.active&&battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex===0&&src&&src.team==='enemy'&&tgt.team==='player'&&tgt.netRemote){netSend({type:'hit',targetType:'player',targetTeamIndex:tgt.netTeamIndex,targetUnitIndex:0,damage:dmg});}
 tgt.hp-=dmg;
 if(tgt.isBoss&&tgt.alive){
  const phase=tgt.hp/tgt.max<=.33?3:(tgt.hp/tgt.max<=.66?2:1);
@@ -4294,7 +4299,7 @@ if(document.pointerLockElement)document.exitPointerLock();
 show('menu');
 };
 window.bSwitch=function(i){
-const ps=units.filter(u=>u.team==='player');
+const ps=units.filter(u=>u.team==='player'&&!u.netRemote);
 if(ps[i]&&ps[i].alive&&i!==activeIdx){activeIdx=i;say2(ps[i].def.name);buildPorts();SND.sfx('swap');}
 };
 window.bAttack=function(){const u=playerUnit();if(u)tryAttack(u);};
