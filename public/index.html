@@ -4284,7 +4284,7 @@ if(type==='stage'){if(win&&!state.cleared[n])state.cleared[n]=1;if(win&&n===stat
 else{state.modeStats[type]=(state.modeStats[type]||0)+1;if(win)state.modeWins[type]=(state.modeWins[type]||0)+1;}
 if(type==='tournament'){if(win){state.tournamentPoints=Math.max(0,state.tournamentPoints+100);state.tournamentWins=(state.tournamentWins||0)+1;}else{state.tournamentPoints=Math.max(0,state.tournamentPoints-35);state.tournamentLosses=(state.tournamentLosses||0)+1;}}
 const xpBase={stage:90,team:100,survival:145,royale:120,raid:190,tournament:165,ranked:135}[type]||80,xpAward=win?xpBase:Math.round(xpBase*.35);
-const levels=[];units.filter(u=>u.team==='player').forEach(u=>{const gained=grantHeroXP(u.def.id,xpAward);if(gained)levels.push(u.def.name+' +'+gained+' ур.');});
+const levels=[];units.filter(u=>u.team==='player'&&!u.netRemote).forEach(u=>{const gained=grantHeroXP(u.def.id,xpAward);if(gained)levels.push(u.def.name+' +'+gained+' ур.');});
 state.playSeconds=(state.playSeconds||0)+Math.max(0,QA.simT||0);
 const lines=win?('Монеты: +'+coins+'<br>Кристаллы: +'+cry+'<br>Опыт каждому бойцу: +'+xpAward+' XP'+(levels.length?'<br>Повышение уровня: '+levels.join(', '):'')):'Награды за победу не получены<br>Опыт каждому бойцу: +'+xpAward+' XP'+(levels.length?'<br>Повышение уровня: '+levels.join(', '):'');
 if(win){state.coins+=coins;state.crystals+=cry;}
@@ -4588,7 +4588,7 @@ camera.lookAt(mx,1.3,0);
 if(featMesh){featMesh.rotation.y+=dt*.4;featMesh.position.y=featBase+Math.sin(now/600)*.03;}
 menuG.userData.dust.opacity=.35+Math.sin(now/900)*.15;
 }else{
-const ps=units.filter(u=>u.team==='player');
+const ps=units.filter(u=>u.team==='player'&&!u.netRemote);
 if(!battleOver)QA.simT+=dt;
 if(!battleOver&&mode==='battle'){
  if(!arenaHazard.active){arenaHazard.t-=dt;if(arenaHazard.t<=0){const live=units.filter(u=>u.alive);const target=live.length?live[Math.floor(Math.random()*live.length)]:null;const hp=target?target.mesh.position:null;arenaHazard.x=hp?hp.x:(Math.random()-.5)*12;arenaHazard.z=hp?hp.z:(Math.random()-.5)*12;arenaHazard.active=true;arenaHazard.warn=1.25;hazardIndicator.position.set(arenaHazard.x,.09,arenaHazard.z);hazardIndicator.visible=true;tele(arenaHazard.x,arenaHazard.z,arenaHazard.r,1450,'hazard');say2('ВНИМАНИЕ: ОПАСНАЯ ЗОНА');}}
