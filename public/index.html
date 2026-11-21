@@ -2933,10 +2933,11 @@ async function socialRequest(path,body){
 let socialPresenceTimer=null;
 async function heartbeatPresence(){if(!cloudToken)return;try{await socialRequest('/presence',{});}catch(e){}}
 let lastPresenceHeartbeat=0;
-const friendMatchStarting=new Set();
+const friendMatchStarting=new Set(),friendMatchNeedsTeam=new Set();
 async function beginFriendBattle(inviteId){
  if(!inviteId||friendMatchStarting.has(inviteId)||onlineSession.active||mode==='battle')return;
- if(!onlineRoster().length){say2('СОБЕРИ ОТРЯД');show('team');return;}
+ if(!onlineRoster().length){if(!friendMatchNeedsTeam.has(inviteId)){friendMatchNeedsTeam.add(inviteId);say2('СОБЕРИ ОТРЯД ДЛЯ БОЯ С ДРУГОМ');show('team');}return;}
+ friendMatchNeedsTeam.delete(inviteId);
  friendMatchStarting.add(inviteId);
  try{
   const issued=await socialRequest('/battle-invites/ticket',{inviteId});
