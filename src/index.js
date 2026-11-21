@@ -381,6 +381,8 @@ export class AccountStore {
       if(changed.rowsWritten!==1)return Response.json({error:"Ticket expired or already used"},{status:401});
       const row=this.ctx.storage.sql.exec("SELECT t.invite_id,t.user_id,t.peer_id,t.mode,i.status,i.created_at FROM match_tickets t JOIN battle_invites i ON i.id=t.invite_id WHERE t.token_hash=?",tokenHash).toArray()[0];
       if(!row||row.status!=="accepted"||row.created_at<now-300000)return Response.json({error:"Invite is no longer active"},{status:401});
+      const used=this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM match_tickets WHERE invite_id=? AND consumed_at>0",row.invite_id).toArray()[0]?.n||0;
+      if(used>=2)this.ctx.storage.sql.exec("UPDATE battle_invites SET status='matched',updated_at=? WHERE id=? AND status='accepted'",now,row.invite_id);
       return Response.json({ok:true,inviteId:row.invite_id,userId:row.user_id,peerId:row.peer_id,mode:row.mode});
     }
     if (url.pathname === "/session/create" && request.method === "POST") {
