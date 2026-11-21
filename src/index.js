@@ -117,8 +117,31 @@ export default {
       if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
         return Response.json({ error: "WebSocket upgrade required" }, { status: 426 });
       }
+      const headers = new Headers(request.headers);
+      for (const key of ["x-match-invite", "x-match-user", "x-match-peer", "x-match-mode"]) headers.delete(key);
+      const ticket = url.searchParams.get("ticket") || "";
+      if (ticket) {
+        if (!/^[A-Za-z0-9_-]{40,80}$/.test(ticket)) return Response.json({ error: "Invalid matchmaking ticket" }, { status: 401 });
+        const consumed = await accountRequest(env, "/ticket/consume", "POST", { ticket });
+        if (!consumed.ok) return new Response(consumed.body, { status: consumed.status, headers: JSON_HEADERS });
+        const access = await consumed.json();
+        if (!access?.ok || !access.inviteId || !access.userId || !access.peerId || access.mode !== "ranked_duel") {
+          return Response.json({ error: "Invalid private match ticket" }, { status: 401, headers: JSON_HEADERS });
+        }
+        headers.set("x-match-invite", access.inviteId);
+        headers.set("x-match-user", access.userId);
+        headers.set("x-match-peer", access.peerId);
+        headers.set("x-match-mode", access.mode);
+        url.searchParams.set("mode", access.mode);
+      }
+      const forwarded = new Request(request, { headers });
+      for (const key of ["x-match-invite", "x-match-user", "x-match-peer", "x-match-mode"]) {
+        const value = headers.get(key);
+        if (value) forwarded.headers.set(key, value);
+        else forwarded.headers.delete(key);
+      }
       const id = env.MATCHMAKER.idFromName("global-matchmaking");
-      return env.MATCHMAKER.get(id).fetch(request);
+      return env.MATCHMAKER.get(id).fetch(forwarded);
     }
 
     return Response.json(
@@ -145,7 +168,11 @@ export class Matchmaker {
     const playerId = (url.searchParams.get("playerId") || "").slice(0, 80);
     const rating = Number(url.searchParams.get("rating") || 1000);
     const mode = url.searchParams.get("mode") || "ranked_duel";
-    const teamSize = mode === "boss_coop" ? 3 : 2;
+    const inviteId = request.headers.get("x-match-invite") || "";
+    const userId = request.headers.get("x-match-user") || "";
+    const peerUserId = request.headers.get("x-match-peer") || "";
+    const privateMode = !!inviteId;
+    const teamSize = privateMode ? 2 : (mode === "boss_coop" ? 3 : 2);
     let roster = [];
 
     try {
@@ -164,7 +191,8 @@ export class Matchmaker {
       rating < 0 ||
       rating > 100000 ||
       !QUEUE_MODES.has(mode) ||
-      roster.length !== expectedRosterSize
+      roster.length !== expectedRosterSize ||
+      (privateMode && (mode !== "ranked_duel" || !/^[0-9]{1,24}$/.test(userId) || !/^[0-9]{1,24}$/.test(peerUserId) || userId === peerUserId || !/^[0-9a-f-]{36}$/i.test(inviteId)))
     ) {
       return Response.json({ error: "Invalid playerId, rating, mode or roster" }, { status: 400 });
     }
@@ -181,6 +209,9 @@ export class Matchmaker {
       mode,
       teamSize,
       status: "waiting",
+      inviteId: privateMode ? inviteId : null,
+      userId: privateMode ? userId : null,
+      peerUserId: privateMode ? peerUserId : null,
       connectedAt: Date.now(),
     });
 
@@ -193,8 +224,10 @@ export class Matchmaker {
           data.teamSize === teamSize &&
           data.playerId !== playerId &&
           socket.readyState === WebSocket.READY_STATE_OPEN &&
-          Math.abs(data.rating - Math.round(rating)) <=
-            Math.max(ratingWindow(data.rating), ratingWindow(rating));
+          (privateMode
+            ? data.inviteId === inviteId && data.userId === peerUserId && data.peerUserId === userId
+            : !data.inviteId && Math.abs(data.rating - Math.round(rating)) <=
+              Math.max(ratingWindow(data.rating), ratingWindow(rating)));
       })
       .sort((a, b) => {
         const aa = a.deserializeAttachment() || {};
@@ -327,6 +360,8 @@ export class AccountStore {
       "CREATE INDEX IF NOT EXISTS friend_to_status_idx ON friend_requests(to_id,status);" +
       "CREATE TABLE IF NOT EXISTS battle_invites (id TEXT PRIMARY KEY, from_id TEXT NOT NULL, to_id TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'ranked_duel', status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);" +
       "CREATE INDEX IF NOT EXISTS battle_invites_to_status_idx ON battle_invites(to_id,status,created_at);" +
+      "CREATE TABLE IF NOT EXISTS match_tickets (token_hash TEXT PRIMARY KEY, invite_id TEXT NOT NULL, user_id TEXT NOT NULL, peer_id TEXT NOT NULL, mode TEXT NOT NULL, expires_at INTEGER NOT NULL, consumed_at INTEGER NOT NULL DEFAULT 0);" +
+      "CREATE UNIQUE INDEX IF NOT EXISTS match_ticket_user_idx ON match_tickets(invite_id,user_id);" +
       "CREATE TABLE IF NOT EXISTS clans (id TEXT PRIMARY KEY, name TEXT NOT NULL, tag TEXT NOT NULL UNIQUE, owner_id TEXT NOT NULL, created_at INTEGER NOT NULL);" +
       "CREATE TABLE IF NOT EXISTS clan_members (clan_id TEXT NOT NULL, telegram_id TEXT NOT NULL UNIQUE, role TEXT NOT NULL DEFAULT 'member', joined_at INTEGER NOT NULL, PRIMARY KEY(clan_id,telegram_id));" +
       "CREATE TABLE IF NOT EXISTS clan_invites (id TEXT PRIMARY KEY, clan_id TEXT NOT NULL, from_id TEXT NOT NULL, to_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', created_at INTEGER NOT NULL, UNIQUE(clan_id,to_id));"
@@ -335,6 +370,19 @@ export class AccountStore {
   }
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === "/ticket/consume" && request.method === "POST") {
+      const body=await request.json().catch(()=>({}));
+      const ticket=String(body.ticket||"");
+      if(!/^[A-Za-z0-9_-]{40,80}$/.test(ticket))return Response.json({error:"Invalid ticket"},{status:401});
+      const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(ticket));
+      const tokenHash=[...new Uint8Array(digest)].map(v=>v.toString(16).padStart(2,"0")).join("");
+      const now=Date.now();
+      const changed=this.ctx.storage.sql.exec("UPDATE match_tickets SET consumed_at=? WHERE token_hash=? AND consumed_at=0 AND expires_at>?",now,tokenHash,now);
+      if(changed.rowsWritten!==1)return Response.json({error:"Ticket expired or already used"},{status:401});
+      const row=this.ctx.storage.sql.exec("SELECT t.invite_id,t.user_id,t.peer_id,t.mode,i.status,i.created_at FROM match_tickets t JOIN battle_invites i ON i.id=t.invite_id WHERE t.token_hash=?",tokenHash).toArray()[0];
+      if(!row||row.status!=="accepted"||row.created_at<now-300000)return Response.json({error:"Invite is no longer active"},{status:401});
+      return Response.json({ok:true,inviteId:row.invite_id,userId:row.user_id,peerId:row.peer_id,mode:row.mode});
+    }
     if (url.pathname === "/session/create" && request.method === "POST") {
       const body = await request.json();
       const user = body?.user;
@@ -382,7 +430,8 @@ export class AccountStore {
         const clanInvites = this.ctx.storage.sql.exec("SELECT i.id,c.name,c.tag,u.username,u.first_name FROM clan_invites i JOIN clans c ON c.id=i.clan_id JOIN users u ON u.telegram_id=i.from_id WHERE i.to_id=? AND i.status='pending' ORDER BY i.created_at DESC",me).toArray().map(r=>({id:r.id,clanName:r.name,tag:r.tag,from:r.username||r.first_name||"Игрок"}));
         const battleInvites=this.ctx.storage.sql.exec("SELECT i.id,i.mode,i.created_at,u.telegram_id,u.username,u.first_name FROM battle_invites i JOIN users u ON u.telegram_id=i.from_id WHERE i.to_id=? AND i.status='pending' AND i.created_at>? ORDER BY i.created_at DESC LIMIT 20",me,now-120000).toArray().map(r=>({id:r.id,mode:r.mode,createdAt:r.created_at,from:userCard(r)}));
         const outgoingBattleInvites=this.ctx.storage.sql.exec("SELECT i.id,i.mode,i.status,i.created_at,u.telegram_id,u.username,u.first_name FROM battle_invites i JOIN users u ON u.telegram_id=i.to_id WHERE i.from_id=? AND i.status='pending' AND i.created_at>? ORDER BY i.created_at DESC LIMIT 20",me,now-120000).toArray().map(r=>({id:r.id,mode:r.mode,createdAt:r.created_at,to:userCard(r)}));
-        return Response.json({friends,incoming,outgoing,clan,clanInvites,battleInvites,outgoingBattleInvites});
+        const readyBattleInvites=this.ctx.storage.sql.exec("SELECT i.id,i.mode,i.from_id,i.to_id,i.created_at,u.telegram_id,u.username,u.first_name FROM battle_invites i JOIN users u ON u.telegram_id=CASE WHEN i.from_id=? THEN i.to_id ELSE i.from_id END WHERE (i.from_id=? OR i.to_id=?) AND i.status='accepted' AND i.created_at>? ORDER BY i.updated_at DESC LIMIT 10",me,me,me,now-300000).toArray().map(r=>({id:r.id,mode:r.mode,createdAt:r.created_at,peer:userCard(r)}));
+        return Response.json({friends,incoming,outgoing,clan,clanInvites,battleInvites,outgoingBattleInvites,readyBattleInvites});
       }
       if (path === "/social/friends/request" && request.method === "POST") {
         const target = String(body.target || "").trim().replace(/^@/,"").slice(0,64);
@@ -415,6 +464,19 @@ export class AccountStore {
         if(invite.created_at<now-120000){this.ctx.storage.sql.exec("UPDATE battle_invites SET status='expired',updated_at=? WHERE id=?",now,id);return Response.json({error:"Время приглашения истекло"},{status:410});}
         this.ctx.storage.sql.exec("UPDATE battle_invites SET status=?,updated_at=? WHERE id=? AND to_id=? AND status='pending'",accept?"accepted":"declined",now,id,me);
         return Response.json({ok:true,accepted:accept,mode:invite.mode,fromId:invite.from_id,inviteId:id});
+      }
+      if (path === "/social/battle-invites/ticket" && request.method === "POST") {
+        const id=String(body.inviteId||"").slice(0,64);
+        const invite=this.ctx.storage.sql.exec("SELECT id,from_id,to_id,mode,created_at,status FROM battle_invites WHERE id=? AND (from_id=? OR to_id=?)",id,me,me).toArray()[0];
+        if(!invite||invite.status!=="accepted"||invite.mode!=="ranked_duel"||invite.created_at<now-300000) return Response.json({error:"Принятое приглашение не найдено или истекло"},{status:404});
+        const peerId=invite.from_id===me?invite.to_id:invite.from_id;
+        const raw=new Uint8Array(32);crypto.getRandomValues(raw);
+        const ticket=btoa(String.fromCharCode(...raw)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
+        const hashBytes=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(ticket)));
+        const tokenHash=[...hashBytes].map(v=>v.toString(16).padStart(2,"0")).join("");
+        this.ctx.storage.sql.exec("DELETE FROM match_tickets WHERE invite_id=? AND user_id=?",id,me);
+        this.ctx.storage.sql.exec("INSERT INTO match_tickets (token_hash,invite_id,user_id,peer_id,mode,expires_at,consumed_at) VALUES (?,?,?,?,?,?,0)",tokenHash,id,me,peerId,invite.mode,now+90000);
+        return Response.json({ok:true,ticket,mode:invite.mode,expiresAt:now+90000});
       }
       if (path === "/social/friends/respond" && request.method === "POST") {
         const id=String(body.requestId||"").slice(0,64), accept=body.accept===true;

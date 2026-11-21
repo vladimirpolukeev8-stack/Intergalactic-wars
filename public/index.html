@@ -2932,13 +2932,32 @@ async function socialRequest(path,body){
 }
 let socialPresenceTimer=null;
 async function heartbeatPresence(){if(!cloudToken)return;try{await socialRequest('/presence',{});}catch(e){}}
+let lastPresenceHeartbeat=0;
+const friendMatchStarting=new Set();
+async function beginFriendBattle(inviteId){
+ if(!inviteId||friendMatchStarting.has(inviteId)||onlineSession.active||mode==='battle')return;
+ if(!onlineRoster().length){say2('СОБЕРИ ОТРЯД');show('team');return;}
+ friendMatchStarting.add(inviteId);
+ try{
+  const issued=await socialRequest('/battle-invites/ticket',{inviteId});
+  if(!issued.ticket)throw new Error('Не удалось получить билет на бой');
+  say2('ДРУГ ПРИНЯЛ ПРИГЛАШЕНИЕ · ПОДКЛЮЧАЕМСЯ…');
+  connectRankedOnline({ticket:issued.ticket,inviteId});
+ }catch(e){friendMatchStarting.delete(inviteId);say2(e.message||'НЕ УДАЛОСЬ ПОДКЛЮЧИТЬСЯ К ДРУГУ');}
+}
 async function refreshFriendPresence(){
- if(!cloudToken||curScreen!=='social')return;
- try{const data=await socialRequest('/');const online=new Map((data.friends||[]).map(u=>[String(u.id),!!u.online]));
-  document.querySelectorAll('[data-friend-id]').forEach(el=>{const on=online.get(el.dataset.friendId)===true;el.textContent=on?'В СЕТИ':'НЕ В СЕТИ';el.classList.toggle('offline',!on);});
+ if(!cloudToken)return;
+ try{
+  const data=await socialRequest('/');
+  if(curScreen==='social'){
+   const online=new Map((data.friends||[]).map(u=>[String(u.id),!!u.online]));
+   document.querySelectorAll('[data-friend-id]').forEach(el=>{const on=online.get(el.dataset.friendId)===true;el.textContent=on?'В СЕТИ':'НЕ В СЕТИ';el.classList.toggle('offline',!on);});
+  }
+  const ready=(data.readyBattleInvites||[]).find(x=>x.mode==='ranked_duel'&&!friendMatchStarting.has(x.id));
+  if(ready&&mode!=='battle'&&!onlineSession.active)beginFriendBattle(ready.id);
  }catch(e){}
 }
-function startSocialPresence(){if(socialPresenceTimer)return;heartbeatPresence();socialPresenceTimer=setInterval(()=>{if(document.visibilityState!=='visible')return;heartbeatPresence();refreshFriendPresence();},20000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')heartbeatPresence();});}
+function startSocialPresence(){if(socialPresenceTimer)return;heartbeatPresence();lastPresenceHeartbeat=Date.now();socialPresenceTimer=setInterval(()=>{if(document.visibilityState!=='visible')return;if(Date.now()-lastPresenceHeartbeat>=20000){lastPresenceHeartbeat=Date.now();heartbeatPresence();}refreshFriendPresence();},5000);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'){lastPresenceHeartbeat=Date.now();heartbeatPresence();refreshFriendPresence();}});}
 async function renderSocial(){
  const root=$('#scr-social');
  root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья, кланы и приглашения игроков</div></div><span class="tag">TELEGRAM ONLINE</span></div><div class="socialLoading card glass">ЗАГРУЖАЕМ СОЦИАЛЬНЫЕ ДАННЫЕ…</div>';
@@ -2949,12 +2968,13 @@ async function renderSocial(){
   const incoming=(data.incoming||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>'+socialEsc(x.user.firstName||x.user.username||'Игрок')+'</b><small>'+(x.user.username?'@'+socialEsc(x.user.username):'ID '+socialEsc(x.user.id))+'</small></div><div class="socialActions"><button class="btn primary" data-social-action="friend-accept" data-id="'+socialEsc(x.requestId)+'">ПРИНЯТЬ</button><button class="btn" data-social-action="friend-decline" data-id="'+socialEsc(x.requestId)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Новых заявок нет.</div>';
   const battleInvites=(data.battleInvites||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>'+socialEsc(x.from.firstName||x.from.username||'Игрок')+'</b><small>Приглашает в рейтинговый бой · 2 минуты на ответ</small></div><div class="socialActions"><button class="btn primary" data-social-action="battle-accept" data-id="'+socialEsc(x.id)+'">ПРИНЯТЬ</button><button class="btn" data-social-action="battle-decline" data-id="'+socialEsc(x.id)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Нет новых приглашений в бой.</div>';
    const outgoingBattle=(data.outgoingBattleInvites||[]).map(x=>'<div class="socialPending">Приглашение игроку '+socialEsc(x.to.firstName||x.to.username||x.to.id)+' · ожидает ответа</div>').join('');
+   const readyBattle=(data.readyBattleInvites||[]).map(x=>'<div class="socialPending">Друг принял приглашение · подключаем приватный бой…</div>').join('');
    const outgoing=(data.outgoing||[]).map(x=>'<div class="socialPending">Ожидает ответа: '+socialEsc(x.user.firstName||x.user.username||x.user.id)+'</div>').join('');
   const clan=data.clan?'<div class="clanBanner"><div class="clanMark">['+socialEsc(data.clan.tag)+']</div><div class="clanInfo"><h2>'+socialEsc(data.clan.name)+'</h2><span>'+data.clan.members+' УЧАСТНИКОВ · '+(data.clan.role==='leader'?'ГЛАВА':'УЧАСТНИК')+'</span></div><button class="btn" data-social-action="clan-leave">ПОКИНУТЬ</button></div><div class="socialForm"><input id="clanInviteTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="clan-invite">ПРИГЛАСИТЬ В КЛАН</button></div>':'<div class="clanCreate"><h3>СОЗДАТЬ КЛАН</h3><p class="mut">Собери команду и приглашай друзей.</p><div class="socialForm"><input id="clanName" maxlength="24" placeholder="Название клана"><input id="clanTag" maxlength="5" placeholder="ТЕГ"><button class="btn primary" data-social-action="clan-create">СОЗДАТЬ</button></div></div>';
   const clanInv=(data.clanInvites||[]).map(x=>'<div class="socialPerson"><div class="socialPersonInfo"><b>['+socialEsc(x.tag)+'] '+socialEsc(x.clanName)+'</b><small>Приглашение от '+socialEsc(x.from)+'</small></div><div class="socialActions"><button class="btn primary" data-social-action="clan-invite-accept" data-id="'+socialEsc(x.id)+'">ВСТУПИТЬ</button><button class="btn" data-social-action="clan-invite-decline" data-id="'+socialEsc(x.id)+'">ОТКЛОНИТЬ</button></div></div>').join('')||'<div class="socialEmpty">Нет приглашений в кланы.</div>';
   const clanRows=(clans.clans||[]).filter(c=>!data.clan||c.id!==data.clan.id).map(c=>'<div class="clanListRow"><div><b>['+socialEsc(c.tag)+'] '+socialEsc(c.name)+'</b><small>'+c.members+' / 50 участников</small></div>'+(data.clan?'':'<button class="btn" data-social-action="clan-join" data-id="'+socialEsc(c.id)+'">ВСТУПИТЬ</button>')+'</div>').join('')||'<div class="socialEmpty">Пока нет открытых кланов.</div>';
   root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Играй вместе. Собирай команду. Создавай кланы.</div></div><span class="tag ok">АККАУНТ ПОДКЛЮЧЁН</span></div>'+
-  '<div class="socialGrid"><section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>ДРУЗЬЯ</h2><p class="mut">Добавление по Telegram ID или username</p></div><span class="socialCount">'+(data.friends||[]).length+'</span></div><div class="socialForm"><input id="friendTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="friend-add">ДОБАВИТЬ</button></div><div class="socialList">'+friendRows+'</div><div class="socialSubhead">ПРИГЛАШЕНИЯ В БОЙ</div><div class="socialList">'+battleInvites+'</div>'+outgoingBattle+'<div class="socialSubhead">ВХОДЯЩИЕ ЗАЯВКИ</div><div class="socialList">'+incoming+'</div>'+outgoing+'</section>'+
+  '<div class="socialGrid"><section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>ДРУЗЬЯ</h2><p class="mut">Добавление по Telegram ID или username</p></div><span class="socialCount">'+(data.friends||[]).length+'</span></div><div class="socialForm"><input id="friendTarget" placeholder="@username или Telegram ID"><button class="btn primary" data-social-action="friend-add">ДОБАВИТЬ</button></div><div class="socialList">'+friendRows+'</div><div class="socialSubhead">ПРИГЛАШЕНИЯ В БОЙ</div><div class="socialList">'+battleInvites+'</div>'+outgoingBattle+readyBattle+'<div class="socialSubhead">ВХОДЯЩИЕ ЗАЯВКИ</div><div class="socialList">'+incoming+'</div>'+outgoing+'</section>'+
   '<section class="card glass socialPanel"><div class="socialPanelHead"><div><h2>КЛАНЫ</h2><p class="mut">Создай свой или вступи в существующий</p></div><span class="socialCount">'+(data.clan?'1':'0')+'</span></div>'+clan+'<div class="socialSubhead">ПРИГЛАШЕНИЯ</div><div class="socialList">'+clanInv+'</div><div class="socialSubhead">ОТКРЫТЫЕ КЛАНЫ</div><div class="socialList">'+clanRows+'</div></section></div>'+
   '<div class="socialFoot">Поиск доступен среди игроков, которые уже запускали Intergalactic Wars через Telegram. Статус присутствия обновляется автоматически примерно каждые 20 секунд.</div>';
  }catch(error){root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья и кланы</div></div></div><div class="card glass socialError">'+socialEsc(error.message)+'<button class="btn" data-social-action="refresh">ПОВТОРИТЬ</button></div>';}
@@ -2969,7 +2989,7 @@ document.addEventListener('click',async e=>{
   if(action==='friend-add'){await socialRequest('/friends/request',{target:val('friendTarget')});say2('ЗАЯВКА ОТПРАВЛЕНА');}
   else if(action==='friend-accept'||action==='friend-decline'){await socialRequest('/friends/respond',{requestId:id,accept:action==='friend-accept'});say2(action==='friend-accept'?'ДРУГ ДОБАВЛЕН':'ЗАЯВКА ОТКЛОНЕНА');}
    else if(action==='battle-invite'){await socialRequest('/battle-invites',{target:id,mode:'ranked_duel'});say2('ПРИГЛАШЕНИЕ В БОЙ ОТПРАВЛЕНО');}
-   else if(action==='battle-accept'||action==='battle-decline'){const result=await socialRequest('/battle-invites/respond',{inviteId:id,accept:action==='battle-accept'});say2(action==='battle-accept'?'ПРИГЛАШЕНИЕ ПРИНЯТО':'ПРИГЛАШЕНИЕ ОТКЛОНЕНО');if(result.accepted)say2('ПРИНЯТО · СЛЕДУЮЩИЙ ЭТАП — ПОДКЛЮЧЕНИЕ К БОЮ');}
+   else if(action==='battle-accept'||action==='battle-decline'){const result=await socialRequest('/battle-invites/respond',{inviteId:id,accept:action==='battle-accept'});say2(action==='battle-accept'?'ПРИГЛАШЕНИЕ ПРИНЯТО':'ПРИГЛАШЕНИЕ ОТКЛОНЕНО');if(result.accepted){await beginFriendBattle(id);}}
   else if(action==='clan-create'){await socialRequest('/clans/create',{name:val('clanName'),tag:val('clanTag')});say2('КЛАН СОЗДАН');}
   else if(action==='clan-join'){await socialRequest('/clans/join',{clanId:id});say2('ТЫ ВСТУПИЛ В КЛАН');}
   else if(action==='clan-leave'){await socialRequest('/clans/leave',{});say2('ТЫ ПОКИНУЛ КЛАН');}
@@ -3385,23 +3405,24 @@ let mode='menu',units=[],projectiles=[],effects=[],summons=[],activeIdx=0,battle
 let onlineSession={active:false,ws:null,playerId:null,roomId:null,remoteUnits:[],lastSend:0,peerId:null};
 function netSend(packet){try{if(onlineSession.ws&&onlineSession.ws.readyState===WebSocket.OPEN)onlineSession.ws.send(JSON.stringify(packet));}catch(e){}}
 function onlineRoster(){return Array.from(new Set((state.team||[]).filter(id=>id&&byId(id)))).slice(0,3);}
-function connectRankedOnline(){
+function connectRankedOnline(options={}){
  const own=onlineRoster();if(!own.length){say2('СОБЕРИ ОТРЯД');show('team');return;}
  if(own.length<3){const extra=state.owned.filter(id=>byId(id)&&!own.includes(id));while(own.length<3&&extra.length)own.push(extra.shift());}
  if(!window.WebSocket||!window.crypto||!crypto.randomUUID){say2('БРАУЗЕР НЕ ПОДДЕРЖИВАЕТ ОНЛАЙН');return;}
  if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}}
- const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],lastSend:0,peerId:null};
- say2('ПОИСК РЕАЛЬНОГО СОПЕРНИКА…');
+ const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],lastSend:0,peerId:null,inviteId:options.inviteId||null};
+ say2(options.ticket?'ПОДКЛЮЧЕНИЕ К ДРУГУ…':'ПОИСК РЕАЛЬНОГО СОПЕРНИКА…');
  const url=new URL('wss://intergalactic-wars-online.vladimirpolukeev8.workers.dev/ws');
  url.searchParams.set('playerId',playerId);url.searchParams.set('rating',String(Number(state.rating)||1000));url.searchParams.set('roster',JSON.stringify(own));
- const ws=new WebSocket(url.toString());onlineSession.ws=ws;
+ if(options.ticket)url.searchParams.set('ticket',options.ticket);
+ const ws=new WebSocket(url.toString());onlineSession.ws=ws;let everMatched=false;
  ws.onmessage=(ev)=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
   if(m.type==='waiting'){say2('ПОИСК СОПЕРНИКА… РЕЙТИНГ '+m.rating);return;}
   if(m.type==='matched'){
    if(onlineSession.active)return;
    const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
    if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
-   onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
+   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
    say2('СОПЕРНИК НАЙДЕН · РЕЙТИНГ '+m.opponent.rating);
    startBattle({type:'ranked',idx:state.stage,wave:1,online:true,rankedOpponentRating:m.opponent.rating,rankedOpponentIds:opp});
    return;
@@ -3414,7 +3435,7 @@ function connectRankedOnline(){
   if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('СОПЕРНИК ОТКЛЮЧИЛСЯ');}
  };
  ws.onerror=()=>say2('ОШИБКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ');
- ws.onclose=()=>{if(!onlineSession.active)say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');};
+ ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId&&!everMatched)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
 }
 function handleOnlineOpponentExit(message){
  if(!onlineSession.active)return;
