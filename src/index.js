@@ -5,7 +5,8 @@ const JSON_HEADERS = {
   "access-control-allow-headers": "content-type, authorization, upgrade",
 };
 
-const QUEUE_MODES = new Set(["ranked_duel", "boss_coop"]);
+const QUEUE_MODES = new Set(["ranked_duel", "boss_coop", "battle_royale"]);
+const ARENA_QUEUE_TYPES = new Set(["ranked", "team", "tournament", "survival", "raid", "royale", "friend"]);
 
 function ratingWindow(rating) {
   return Math.min(500, 100 + Math.floor(Math.max(0, rating) / 500) * 50);
@@ -64,10 +65,12 @@ export default {
           service: "intergalactic-wars-matchmaker",
           version: 4,
           telegramAccounts: true,
+          telegramAuthConfigured: !!env.TELEGRAM_BOT_TOKEN,
           social: { friends: true, clans: true, clanInvites: true },
           queues: {
             ranked_duel: { playersPerMatch: 2, rosterPerPlayer: 3 },
             boss_coop: { playersPerMatch: 3, rosterPerPlayer: 1 },
+            battle_royale: { playersPerMatch: 6, rosterPerPlayer: 1 },
           },
         },
         { headers: JSON_HEADERS },
@@ -168,11 +171,12 @@ export class Matchmaker {
     const playerId = (url.searchParams.get("playerId") || "").slice(0, 80);
     const rating = Number(url.searchParams.get("rating") || 1000);
     const mode = url.searchParams.get("mode") || "ranked_duel";
+    const arenaType = url.searchParams.get("arenaType") || (mode === "boss_coop" ? "survival" : mode === "battle_royale" ? "royale" : "ranked");
     const inviteId = request.headers.get("x-match-invite") || "";
     const userId = request.headers.get("x-match-user") || "";
     const peerUserId = request.headers.get("x-match-peer") || "";
     const privateMode = !!inviteId;
-    const teamSize = privateMode ? 2 : (mode === "boss_coop" ? 3 : 2);
+    const teamSize = privateMode ? 2 : (mode === "boss_coop" ? 3 : mode === "battle_royale" ? 6 : 2);
     let roster = [];
 
     try {
@@ -184,13 +188,19 @@ export class Matchmaker {
       }
     } catch {}
 
-    const expectedRosterSize = mode === "boss_coop" ? 1 : 3;
+    const expectedRosterSize = ["survival", "raid", "royale"].includes(arenaType) ? 1 : 3;
+    const validQueue =
+      (["ranked", "team", "tournament", "friend"].includes(arenaType) && mode === "ranked_duel") ||
+      (["survival", "raid"].includes(arenaType) && mode === "boss_coop") ||
+      (arenaType === "royale" && mode === "battle_royale");
     if (
       !/^[a-zA-Z0-9_-]{8,80}$/.test(playerId) ||
       !Number.isFinite(rating) ||
       rating < 0 ||
       rating > 100000 ||
       !QUEUE_MODES.has(mode) ||
+      !ARENA_QUEUE_TYPES.has(arenaType) ||
+      !validQueue ||
       roster.length !== expectedRosterSize ||
       (privateMode && (mode !== "ranked_duel" || !/^[0-9]{1,24}$/.test(userId) || !/^[0-9]{1,24}$/.test(peerUserId) || userId === peerUserId || !/^[0-9a-f-]{36}$/i.test(inviteId)))
     ) {
@@ -212,6 +222,8 @@ export class Matchmaker {
       inviteId: privateMode ? inviteId : null,
       userId: privateMode ? userId : null,
       peerUserId: privateMode ? peerUserId : null,
+      arenaType,
+      teamIndex: null,
       connectedAt: Date.now(),
     });
 
@@ -221,6 +233,7 @@ export class Matchmaker {
         return socket !== server &&
           data.status === "waiting" &&
           data.mode === mode &&
+          data.arenaType === arenaType &&
           data.teamSize === teamSize &&
           data.playerId !== playerId &&
           socket.readyState === WebSocket.READY_STATE_OPEN &&
@@ -264,6 +277,7 @@ export class Matchmaker {
             mode,
             roomId,
             self: { playerId: data.playerId, rating: data.rating },
+            teamIndex: index,
             opponent,
           }));
         } else {
@@ -272,6 +286,7 @@ export class Matchmaker {
             mode,
             roomId,
             selfPlayerId: data.playerId,
+            teamIndex: index,
             team: players,
           }));
         }
