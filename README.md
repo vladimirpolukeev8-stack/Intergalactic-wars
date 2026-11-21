@@ -1,11 +1,29 @@
 # Intergalactic Wars — Online Server
 
-Отдельный Cloudflare Worker для подбора двух игроков и WebSocket-релея игровых событий. Существующий сайт игры этим проектом не заменяется.
+Отдельный Cloudflare Worker для онлайн-подбора и WebSocket-релея игровых событий. Telegram game Worker остаётся отдельным сервисом.
 
 ## Эндпоинты
 
-- `GET /health` — проверка доступности.
-- `GET /ws?playerId=<unique-id>&rating=<number>` — WebSocket-подключение и подбор соперника.
+- `GET /health` — проверка доступности и возможностей очередей.
+- `GET /ws?playerId=<unique-id>&rating=<number>&roster=<json>` — WebSocket-подключение.
+- Параметр `mode` выбирает очередь: `ranked_duel` или `boss_coop`.
+
+## Очереди подбора
+
+| Режим | Игроков в матче | Персонажей в составе игрока |
+| --- | ---: | ---: |
+| `ranked_duel` (режим по умолчанию для старого клиента) | 2 | 3 |
+| `boss_coop` | 3 | 1 |
+
+Старый клиент, который не передаёт `mode`, продолжает попадать в `ranked_duel`. Очереди разных режимов изолированы друг от друга.
+
+Для кооперативного босса клиент передаёт `mode=boss_coop` и массив из одного ID персонажа. После набора трёх игроков сервер отправляет каждому пакет `matched` с полем `team`, содержащим всех трёх участников.
+
+## Протокол WebSocket
+
+Сервер отправляет `waiting`, затем `matched` участникам собранной группы. Внутри матча сервер пересылает ограниченный набор событий `input`, `action`, `snapshot`, `hit`, `leave` и `ping) другим участникам комнаты. В пересылаемом событии указываются `playerId` и `teamIndex`.
+
+При отключении участника остальные получают `opponent-disconnected`.
 
 ## Локальный запуск
 
@@ -21,37 +39,26 @@ npx wrangler login
 npm run deploy
 ```
 
-После первого deploy Cloudflare создаст Durable Object namespace согласно миграции в `wrangler.toml`.
+После первого deploy Cloudflare создаёт Durable Object namespace согласно миграции в `wrangler.toml`.
 
-## Протокол
+## Ограничения текущего этапа
 
-Сервер отправляет `waiting`, затем `matched` обоим участникам. В матче он пересылает ограниченный набор событий `input`, `action`, `snapshot`, `leave` и `ping` второму игроку. При отключении отправляет `opponent-disconnected`.
+Это серверный транспорт и подбор групп, а не авторитетный игровой сервер. Он не рассчитывает физику, попадания, здоровье или победителя и не должен использоваться как источник подтверждённого рейтингового результата.
 
-## Важное ограничение текущего этапа
-
-Это только серверный транспорт и подбор. Он **не является авторитетным игровым сервером**: клиентские события пока пересылаются второму игроку, но сервер не рассчитывает физику, попадания, здоровье или победителя. Нельзя доверять клиентскому результату рейтингового матча.
-
-HTML-клиент с WebSocket-интеграцией находится в `public/index.html`. Сервер пересылает игровые события между клиентами, но пока не является авторитетным: он не рассчитывает физику, попадания, здоровье или победителя.
+Поддержка очереди `boss_coop` добавлена на сервере как основа следующего клиентского этапа. Игровой клиент пока не подключён к этой очереди и не реализует совместный бой с тремя игроками. Текущий клиент продолжает использовать старую очередь `ranked_duel`.
 
 ## Telegram game Worker
 
-The Telegram launch URL remains the existing Worker `orange-meadow-ad87`.
-The static game build is stored at `public/index.html` and is deployed separately
-from the matchmaking server.
+Telegram launch URL остаётся прежним Worker `orange-meadow-ad87`. Статическая сборка находится в `public/index.html` и публикуется отдельно от сервера подбора.
 
-For the Telegram game Worker, connect a Cloudflare Workers Builds project to this
-repository and use this deploy command:
+Команда публикации Telegram game Worker:
 
 ```bash
 npx wrangler deploy --config wrangler-game.toml
 ```
 
-Keep the existing matchmaking Worker project on its current command:
+Команда публикации онлайн-сервера остаётся:
 
 ```bash
 npx wrangler deploy
 ```
-
-This keeps the game host and the WebSocket matchmaking server as separate Workers.
-
-<!-- Cloudflare Workers Builds trigger: keep this repository's production branch active. -->
