@@ -132,9 +132,9 @@ export default {
         headers.set("x-match-user", access.userId);
         headers.set("x-match-peer", access.peerId);
         headers.set("x-match-mode", access.mode);
-        url.searchParams.delete("ticket");
+        url.searchParams.set("mode", access.mode);
       }
-      const forwarded = new Request(url.toString(), request);
+      const forwarded = new Request(request, { headers });
       for (const key of ["x-match-invite", "x-match-user", "x-match-peer", "x-match-mode"]) {
         const value = headers.get(key);
         if (value) forwarded.headers.set(key, value);
