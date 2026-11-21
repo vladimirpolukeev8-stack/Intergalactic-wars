@@ -356,7 +356,6 @@ export class Matchmaker {
           playerId: data.playerId,
           teamIndex: data.teamIndex,
         }));
-        peer.serializeAttachment({ ...peerData, status: "finished" });
       }
     }
   }
