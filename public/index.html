@@ -1067,14 +1067,18 @@ function queueCloudProfileSave(){
 function save(){try{state._cloudUpdatedAt=Date.now();localStorage.setItem('igw4',JSON.stringify(state));}catch(e){}queueCloudProfileSave();}
 async function initializeTelegramAccount(){
  const tg=window.Telegram&&window.Telegram.WebApp;
- if(!tg||!tg.initData)return;
+ if(!tg){window.__igwAccountStatus='telegram_sdk_missing';window.__igwAuthError='Не загрузился Telegram WebApp SDK. Закрой мини-приложение и открой его заново из бота.';if(curScreen==='social')renderSocial();return;}
+ tg.ready();tg.expand();
+ const initData=tg.initData||'';
+ if(!initData){window.__igwAccountStatus='init_data_missing';window.__igwAuthError='Telegram не передал данные запуска. Открой именно кнопку мини-приложения в чате с ботом, а не обычную ссылку.';if(curScreen==='social')renderSocial();return;}
  try{
-  tg.ready();tg.expand();
-  const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData:tg.initData})});
-  if(!auth.ok)throw new Error('Telegram auth failed: '+auth.status);
-  const authData=await auth.json();cloudToken=authData.token;
+  const auth=await fetch(CLOUD_API+'/api/auth/telegram',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({initData})});
+  const authData=await auth.json().catch(()=>({}));
+  if(!auth.ok)throw new Error(authData.error||('Ошибка авторизации Telegram: HTTP '+auth.status));
+  if(!authData.token)throw new Error('Сервер авторизации не выдал сессию. Проверь настройку Telegram Bot Token в онлайн Worker.');
+  cloudToken=authData.token;
   const response=await fetch(CLOUD_API+'/api/profile',{headers:{'authorization':'Bearer '+cloudToken}});
-  if(!response.ok)throw new Error('Cloud profile read failed: '+response.status);
+  if(!response.ok)throw new Error('Не удалось загрузить профиль: HTTP '+response.status);
   const remote=await response.json();
   if(remote.profile&&typeof remote.profile==='object'){
    const cloudTime=Number(remote.updatedAt)||0;
@@ -1084,20 +1088,17 @@ async function initializeTelegramAccount(){
     localStorage.setItem('igw4',JSON.stringify(state));
     const marker='igw_cloud_restore_reload';
     if(sessionStorage.getItem(marker)!==String(cloudTime)){sessionStorage.setItem(marker,String(cloudTime));location.reload();return;}
-   }else{
-    await putCloudProfile();
-   }
-  }else{
-   await putCloudProfile();
-  }
-  cloudSyncReady=true;
-  startSocialPresence();
-  window.__igwAccount=authData.user;
-  window.__igwAccountStatus='connected';
+   }else{await putCloudProfile();}
+  }else{await putCloudProfile();}
+  cloudSyncReady=true;startSocialPresence();
+  window.__igwAccount=authData.user;window.__igwAccountStatus='connected';window.__igwAuthError='';
+  if(curScreen==='social')renderSocial();
  }catch(error){
-  window.__igwAccountStatus='offline';
+  cloudToken=null;cloudSyncReady=false;window.__igwAccountStatus='offline';
+  window.__igwAuthError=String(error&&error.message||'Неизвестная ошибка авторизации');
   console.warn('Telegram account/cloud sync:',error);
- }
+  if(curScreen==='social')renderSocial();
+ } 
 }
 
 function rng(seed){let a=seed>>>0;return()=>{a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
@@ -2909,9 +2910,10 @@ renderCur();
 window.go=show;
 document.addEventListener('click',e=>{
 if(curScreen!=='battle'&&e.target.closest('button'))SND.sfx('click');
+const retry=e.target.closest('[data-social-retry]');if(retry){retry.disabled=true;retry.textContent='ПРОВЕРЯЕМ…';initializeTelegramAccount().then(()=>renderSocial()).catch(()=>renderSocial());return;}
 const g=e.target.closest('[data-go]');if(g){show(g.dataset.go);return;}
 const ranked=e.target.closest('[data-ranked-start]');if(ranked){startRankedMatch();return;}
-const gm=e.target.closest('[data-mode-start]');if(gm){if(!state.team.some(id=>id&&byId(id))){say2('СОБЕРИ ОТРЯД');show('team');return;}startBattle({type:gm.dataset.modeStart,idx:state.stage,wave:1});return;}
+const gm=e.target.closest('[data-mode-start]');if(gm){startArenaMode(gm.dataset.modeStart);return;}
 const st=e.target.closest('[data-stage]');if(st){startStage(+st.dataset.stage);return;}
 if(e.target.closest('.slot:not(.filled)'))say2('ВЫБЕРИ БОЙЦА НИЖЕ');
 });
@@ -2924,7 +2926,7 @@ $('#tabbar').innerHTML=NAV.filter(x=>x[0]!=='profile').map(x=>'<button data-go="
 /* ---------- social hub ---------- */
 function socialEsc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 async function socialRequest(path,body){
- if(!cloudToken)throw new Error('Открой игру через Telegram, чтобы подключить аккаунт.');
+ if(!cloudToken)throw new Error(window.__igwAuthError||'Аккаунт Telegram не подключён. Перезапусти мини-приложение из бота.');
  const response=await fetch(CLOUD_API+'/api/social'+path,{method:body===undefined?'GET':'POST',headers:{'content-type':'application/json','authorization':'Bearer '+cloudToken},body:body===undefined?undefined:JSON.stringify(body)});
  const data=await response.json().catch(()=>({}));
  if(!response.ok)throw new Error(data.error||('Ошибка сервера: '+response.status));
@@ -2962,7 +2964,7 @@ function startSocialPresence(){if(socialPresenceTimer)return;heartbeatPresence()
 async function renderSocial(){
  const root=$('#scr-social');
  root.innerHTML='<div class="hRow"><div><h1>СОЦИ<em>УМ</em></h1><div class="sub">Друзья, кланы и приглашения игроков</div></div><span class="tag">TELEGRAM ONLINE</span></div><div class="socialLoading card glass">ЗАГРУЖАЕМ СОЦИАЛЬНЫЕ ДАННЫЕ…</div>';
- if(!cloudToken){root.querySelector('.socialLoading').innerHTML='Для доступа к друзьям и кланам открой мини-приложение через своего Telegram-бота.';return;}
+ if(!cloudToken){let raw=String(window.__igwAuthError||'Аккаунт Telegram ещё не подключён.');if(raw.toLowerCase().includes('not configured'))raw='На онлайн-сервере не настроен Telegram Bot Token. После публикации добавь в GitHub → Settings → Secrets and variables → Actions секрет TELEGRAM_BOT_TOKEN со значением токена своего бота. Сам токен в чат не отправляй.';const reason=socialEsc(raw);root.querySelector('.socialLoading').innerHTML='<b>НЕ УДАЛОСЬ ПОДКЛЮЧИТЬ АККАУНТ</b><div class="mut" style="margin:8px 0 14px">'+reason+'</div><button class="btn primary" data-social-retry>ПОВТОРИТЬ АВТОРИЗАЦИЮ</button>';return;}
  try{
   const [data,clans]=await Promise.all([socialRequest('/'),socialRequest('/clans')]);
   const friendRows=(data.friends||[]).map(u=>'<div class="socialPerson"><div class="socialAvatar">'+(u.photoUrl?'<img src="'+socialEsc(u.photoUrl)+'" alt="">':'<span>✦</span>')+'</div><div class="socialPersonInfo"><b>'+socialEsc(u.firstName||u.username||'Игрок')+'</b><small>'+(u.username?'@'+socialEsc(u.username):'ID '+socialEsc(u.id))+'</small></div><div class="socialActions"><span class="socialOnline '+(u.online?'':'offline')+'" data-friend-id="'+socialEsc(u.id)+'">'+(u.online?'В СЕТИ':'НЕ В СЕТИ')+'</span><button class="btn" data-social-action="battle-invite" data-id="'+socialEsc(u.id)+'">В БОЙ</button></div></div>').join('')||'<div class="socialEmpty">Пока нет друзей. Найди игрока по Telegram ID или username.</div>';
@@ -3060,20 +3062,26 @@ document.querySelectorAll('[data-spage]').forEach(b=>b.onclick=()=>{stagePage=+b
 /* ---------- arena ---------- */
 function renderArena(){
  const modes=[
-  {id:'team',title:'КОМАНДНЫЙ БОЙ',desc:'Твой отряд против трёх противников. Побеждает команда, сохранившая бойцов.',meta:'3 НА 3',reward:'+120 монет · +25 кр.',art:'⚔'},
-  {id:'survival',title:'ВЫЖИВАНИЕ',desc:'Пять волн врагов подряд. Здоровье и состав твоего отряда сохраняются между волнами.',meta:'5 ВОЛН',reward:'+200 монет · +50 кр.',art:'♜'},
-  {id:'royale',title:'КОРОЛЕВСКАЯ БИТВА',desc:'Ты выходишь на арену одним бойцом против шести независимых соперников. Каждый сам выбирает цель и может атаковать других.',meta:'1 БОЕЦ · 6 СОПЕРНИКОВ',reward:'+160 монет · +40 кр.',art:'✦'},
-  {id:'raid',title:'РЕЙД НА БОССА',desc:'Сразись с огромным боссом и двумя его защитниками. Это самый сложный одиночный бой.',meta:'БОСС + 2 ЗАЩИТНИКА',reward:'+260 монет · +80 кр.',art:'☄'},
-  {id:'tournament',title:'ТУРНИР',desc:'Три последовательных раунда. В финале выйдет усиленный чемпион.',meta:'3 РАУНДА · ФИНАЛ',reward:'+220 монет · +60 кр.',art:'🏆'}
+  {id:'team',title:'КОМАНДНЫЙ БОЙ',desc:'Два реальных игрока. У каждого отряд из трёх персонажей.',meta:'2 ИГРОКА · 3 НА 3',reward:'+120 монет · +25 кр.',art:'⚔'},
+  {id:'survival',title:'ВЫЖИВАНИЕ',desc:'Три игрока вместе проходят пять волн противников.',meta:'3 ИГРОКА · 5 ВОЛН',reward:'+200 монет · +50 кр.',art:'♜'},
+  {id:'royale',title:'КОРОЛЕВСКАЯ БИТВА',desc:'Шесть реальных игроков. Каждый выходит одним персонажем и сражается сам за себя.',meta:'6 ИГРОКОВ · 1 БОЕЦ',reward:'+160 монет · +40 кр.',art:'✦'},
+  {id:'raid',title:'РЕЙД НА БОССА',desc:'Три игрока объединяются против босса и двух защитников.',meta:'3 ИГРОКА · БОСС',reward:'+260 монет · +80 кр.',art:'☄'},
+  {id:'tournament',title:'ТУРНИР',desc:'Два реальных игрока проводят серию из трёх раундов.',meta:'2 ИГРОКА · 3 РАУНДА',reward:'+220 монет · +60 кр.',art:'🏆'}
  ];
- $('#scr-arena').innerHTML='<div class="hRow"><div><h1>РЕЖИ<em>МЫ</em></h1><div class="sub">Выбери формат сражения. Все режимы доступны офлайн.</div></div><span class="tag">5 РЕЖИМОВ</span></div>'+
+ $('#scr-arena').innerHTML='<div class="hRow"><div><h1>РЕЖИ<em>МЫ</em></h1><div class="sub">Все пять режимов используют онлайн-подбор игроков.</div></div><span class="tag">5 ОНЛАЙН-РЕЖИМОВ</span></div>'+
  '<div class="modeGrid">'+modes.map(m=>'<article class="modeCard card glass"><div class="modeTop"><span class="modeArt">'+m.art+'</span><span class="tag">'+m.meta+'</span></div><h2>'+m.title+'</h2><p class="mut">'+m.desc+'</p><div class="modeBottom"><span class="modeReward">'+m.reward+'</span><button class="btn primary" data-mode-start="'+m.id+'">НАЧАТЬ</button></div><div class="modeStats">Побед: '+(state.modeWins[m.id]||0)+' · Боев: '+(state.modeStats[m.id]||0)+'</div></article>').join('')+'</div>'+
  '<div class="card glass" style="margin-top:16px"><div class="hRow"><div><h2>ТУРНИРНАЯ ЛИГА</h2><div class="sub">Рейтинг за победы в трёхраундовых турнирах</div></div><span class="tag">'+tournamentRank(state.tournamentPoints).name+'</span></div><div class="detailStats"><div class="detailStat"><span class="mut">Очки лиги</span><b>'+state.tournamentPoints+'</b></div><div class="detailStat"><span class="mut">Победы</span><b>'+state.tournamentWins+'</b></div><div class="detailStat"><span class="mut">Поражения</span><b>'+state.tournamentLosses+'</b></div></div><div class="taskBar"><i style="width:'+tournamentRank(state.tournamentPoints).progress+'%"></i></div><div class="mut" style="margin-top:7px">'+(tournamentRank(state.tournamentPoints).next===null?'Высший дивизион достигнут':'До следующего дивизиона: '+(tournamentRank(state.tournamentPoints).next-state.tournamentPoints)+' очков')+'</div></div>'+
  '<div class="card glass" style="margin-top:16px;padding:18px"><div class="hRow"><div><h2>РЕЙТИНГОВЫЙ ПОДБОР</h2><div class="sub">Поиск соперников с близким уровнем рейтинга</div></div><span class="tag">'+tournamentRank(state.rating).name+'</span></div><div class="detailStats"><div class="detailStat"><span class="mut">Твой рейтинг</span><b>'+state.rating+'</b></div><div class="detailStat"><span class="mut">Окно поиска</span><b>±'+rankedSearchRange(state.rating)+'</b></div></div><div class="mut" style="margin:8px 0 14px">Здесь выполняется подбор реального игрока по рейтингу. Для матча оба игрока подключаются к общему серверу.</div><button class="btn primary big" data-ranked-start>НАЙТИ СОПЕРНИКА</button></div>'+
  '<div class="card glass devBox" style="margin-top:16px"><span class="tag dev">ОНЛАЙН · НУЖЕН СЕРВЕР</span><h2>РЕАЛЬНЫЙ PVP</h2><div class="mut" style="max-width:560px;margin:0 auto">Подключён сервер реального подбора и обмена состоянием бойцов. Рейтинговый бой запускается после соединения двух игроков.</div></div>';
 }
 function rankedSearchRange(rating){return Math.min(260,70+Math.floor(Math.max(0,Number(rating)||0)/500)*25);}
-function startRankedMatch(){connectRankedOnline();}
+function startRankedMatch(){connectRankedOnline({arenaType:'ranked'});}
+function startArenaMode(arenaType){
+ const single=['survival','raid','royale'].includes(arenaType);
+ const available=single?(state.team.find(id=>id&&byId(id))||state.owned.find(id=>byId(id))):onlineRoster()[0];
+ if(!available){say2('СНАЧАЛА ПОЛУЧИ ПЕРСОНАЖА');show('team');return;}
+ connectRankedOnline({arenaType});
+}
 
 /* ---------- summon ---------- */
 function renderSummon(){
@@ -3407,52 +3415,79 @@ let onlineSession={active:false,ws:null,playerId:null,roomId:null,remoteUnits:[]
 function netSend(packet){try{if(onlineSession.ws&&onlineSession.ws.readyState===WebSocket.OPEN)onlineSession.ws.send(JSON.stringify(packet));}catch(e){}}
 function onlineRoster(){return Array.from(new Set((state.team||[]).filter(id=>id&&byId(id)))).slice(0,3);}
 function connectRankedOnline(options={}){
- const own=onlineRoster();if(!own.length){say2('СОБЕРИ ОТРЯД');show('team');return;}
- if(own.length<3){const extra=state.owned.filter(id=>byId(id)&&!own.includes(id));while(own.length<3&&extra.length)own.push(extra.shift());}
+ const arenaType=options.arenaType||'ranked',single=['survival','raid','royale'].includes(arenaType);
+ const own=single?[onlineRoster()[0]||state.owned.find(id=>byId(id))].filter(Boolean):onlineRoster();
+ if(!own.length){say2('СНАЧАЛА СОБЕРИ ОТРЯД');show('team');return;}
+ if(!single&&own.length<3){const extra=state.owned.filter(id=>byId(id)&&!own.includes(id));while(own.length<3&&extra.length)own.push(extra.shift());}
  if(!window.WebSocket||!window.crypto||!crypto.randomUUID){say2('БРАУЗЕР НЕ ПОДДЕРЖИВАЕТ ОНЛАЙН');return;}
  if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}}
- const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],lastSend:0,peerId:null,inviteId:options.inviteId||null};
- say2(options.ticket?'ПОДКЛЮЧЕНИЕ К ДРУГУ…':'ПОИСК РЕАЛЬНОГО СОПЕРНИКА…');
+ const queueMode=arenaType==='royale'?'battle_royale':(['survival','raid'].includes(arenaType)?'boss_coop':'ranked_duel');
+ const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],remoteUnitsByTeam:{},lastSend:0,peerId:null,inviteId:options.inviteId||null,teamIndex:0,arenaType};
+ say2(options.ticket?'ПОДКЛЮЧЕНИЕ К ДРУГУ…':'ПОИСК ИГРОКОВ · '+({team:'КОМАНДНЫЙ БОЙ',survival:'ВЫЖИВАНИЕ',royale:'КОРОЛЕВСКАЯ БИТВА',raid:'РЕЙД НА БОССА',tournament:'ТУРНИР',ranked:'РЕЙТИНГ'}[arenaType]||'ОНЛАЙН'));
  const url=new URL('wss://intergalactic-wars-online.vladimirpolukeev8.workers.dev/ws');
  url.searchParams.set('playerId',playerId);url.searchParams.set('rating',String(Number(state.rating)||1000));url.searchParams.set('roster',JSON.stringify(own));
- if(options.ticket)url.searchParams.set('ticket',options.ticket);
+ url.searchParams.set('mode',queueMode);url.searchParams.set('arenaType',arenaType);
+ if(options.ticket){url.searchParams.set('ticket',options.ticket);url.searchParams.set('arenaType','friend');}
  const ws=new WebSocket(url.toString());onlineSession.ws=ws;let everMatched=false;
  ws.onmessage=(ev)=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
-  if(m.type==='waiting'){say2('ПОИСК СОПЕРНИКА… РЕЙТИНГ '+m.rating);return;}
+  if(m.type==='waiting'){say2('ОЧЕРЕДЬ · '+(m.playersFound||1)+' / '+(m.playersNeeded||2)+' ИГРОКОВ');return;}
   if(m.type==='matched'){
    if(onlineSession.active)return;
-   const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
-   if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
-   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
-   say2('СОПЕРНИК НАЙДЕН · РЕЙТИНГ '+m.opponent.rating);
-   startBattle({type:'ranked',idx:state.stage,wave:1,online:true,rankedOpponentRating:m.opponent.rating,rankedOpponentIds:opp});
+   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.teamIndex=Number(m.teamIndex)||0;
+   if(m.mode==='ranked_duel'){
+    const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
+    if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
+    onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
+    say2('ИГРОК НАЙДЕН · НАЧИНАЕМ БОЙ');
+    const type=arenaType==='friend'?'ranked':arenaType;
+    startBattle({type,idx:state.stage,wave:1,online:true,onlineOpponentIds:opp,rankedOpponentIds:opp,rankedOpponentRating:m.opponent.rating,onlineArenaType:arenaType});
+   }else{
+    const team=Array.isArray(m.team)?m.team:[];
+    if(team.length!==(m.mode==='battle_royale'?6:3)){say2('ОШИБКА СОСТАВА КОМНАТЫ');ws.close();return;}
+    onlineSession.peerId=null;onlineSession.remoteUnits=[];
+    say2('КОМНАТА СОБРАНА · '+team.length+' ИГРОКОВ');
+    startBattle({type:arenaType,idx:state.stage,wave:1,online:true,coop:['survival','raid'].includes(arenaType),onlineTeam:team,onlineArenaType:arenaType});
+   }
    return;
   }
   if(m.type==='peer-event'&&m.event){const e=m.event;
-   if(e.type==='snapshot'&&onlineSession.active){const list=Array.isArray(e.units)?e.units:[];list.forEach((v,i)=>{const u=onlineSession.remoteUnits[i];if(!u||!v)return;const num=(x,f=0)=>Number.isFinite(Number(x))?Number(x):f;u.netTarget={x:num(v.x),y:num(v.y),z:num(v.z),yaw:num(v.yaw)};u.ai.face=u.netTarget.yaw;if(Number.isFinite(Number(v.max))&&Number(v.max)>0)u.max=Number(v.max);u.hp=Math.max(0,Math.min(u.max,num(v.hp)));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});checkEnd();}
-   if(e.type==='hit'&&onlineSession.active){const t=units.filter(u=>u.team==='player')[Math.max(0,Math.min(2,e.target|0))];if(t&&t.alive){t.hp=Math.max(0,t.hp-Math.max(0,Number(e.damage)||0));if(t.hp<=0){t.alive=false;t.deathT=0;if(t.bar)t.bar.style.display='none';checkEnd();}}}
-   if(e.type==='leave'){handleOnlineOpponentExit('СОПЕРНИК ПОКИНУЛ БОЙ');}
+   if(e.type==='snapshot'&&onlineSession.active){
+    const remoteSet=onlineSession.remoteUnitsByTeam&&onlineSession.remoteUnitsByTeam[m.teamIndex]||onlineSession.remoteUnits;
+    const list=Array.isArray(e.units)?e.units:[];
+    list.forEach((v,i)=>{const u=remoteSet[i];if(!u||!v)return;const num=(x,f=0)=>Number.isFinite(Number(x))?Number(x):f;u.netTarget={x:num(v.x),y:num(v.y),z:num(v.z),yaw:num(v.yaw)};u.ai.face=u.netTarget.yaw;if(Number.isFinite(Number(v.max))&&Number(v.max)>0)u.max=Number(v.max);u.hp=Math.max(0,Math.min(u.max,num(v.hp)));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});
+    if(Array.isArray(e.enemyUnits)&&battleCfg&&battleCfg.coop&&onlineSession.teamIndex!==0){const foes=units.filter(u=>u.team==='enemy'&&!u.netRemote);e.enemyUnits.forEach((v,i)=>{const u=foes[i];if(!u||!v)return;u.netDriven=true;u.netTarget={x:Number(v.x)||0,y:Number(v.y)||0,z:Number(v.z)||0,yaw:Number(v.yaw)||0};u.ai.face=u.netTarget.yaw;u.hp=Math.max(0,Math.min(u.max,Number(v.hp)||0));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});}
+    checkEnd();
+   }
+   if(e.type==='hit'&&onlineSession.active){
+    let t=null;
+    if(e.targetType==='player'&&Number(e.targetTeamIndex)===onlineSession.teamIndex)t=units.filter(u=>u.team==='player'&&!u.netRemote)[Math.max(0,Math.min(2,e.targetUnitIndex|0))];
+    else if(e.targetType==='enemy')t=units.filter(u=>u.team==='enemy'&&!u.netRemote)[Math.max(0,e.target|0)];
+    else if(!e.targetType)t=units.filter(u=>u.team==='player'&&!u.netRemote)[Math.max(0,Math.min(2,e.target|0))];
+    if(t&&t.alive){t.hp=Math.max(0,t.hp-Math.max(0,Number(e.damage)||0));if(t.hp<=0){t.hp=0;t.alive=false;t.deathT=0;if(t.bar)t.bar.style.display='none';checkEnd();}}
+   }
+   if(e.type==='leave'){handleOnlineOpponentExit('ИГРОК ПОКИНУЛ БОЙ',m.teamIndex);}
   }
-  if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('СОПЕРНИК ОТКЛЮЧИЛСЯ');}
+  if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('ИГРОК ОТКЛЮЧИЛСЯ',m.teamIndex);}
  };
  ws.onerror=()=>say2('ОШИБКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ');
  ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId&&!everMatched)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
 }
-function handleOnlineOpponentExit(message){
+function handleOnlineOpponentExit(message,teamIndex){
  if(!onlineSession.active)return;
- say2(message||'СОПЕРНИК ОТКЛЮЧИЛСЯ');
- if(mode==='battle'&&battleCfg&&battleCfg.online&&battleCfg.type==='ranked'){
-  onlineSession.remoteUnits.forEach(u=>{if(!u)return;u.hp=0;u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';});
-  checkEnd();
- }else{
-  onlineSession.active=false;onlineSession.remoteUnits=[];
- }
+ say2(message||'ИГРОК ОТКЛЮЧИЛСЯ');
+ const targets=Number.isInteger(Number(teamIndex))?(onlineSession.remoteUnitsByTeam[Number(teamIndex)]||[]):onlineSession.remoteUnits;
+ targets.forEach(u=>{if(!u)return;u.hp=0;u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';});
+ checkEnd();
 }
 function sendOnlineSnapshot(now){
  if(!onlineSession.active||!onlineSession.ws||onlineSession.ws.readyState!==WebSocket.OPEN||now-onlineSession.lastSend<60)return;
  onlineSession.lastSend=now;
- const own=units.filter(u=>u.team==='player');
- netSend({type:'snapshot',units:own.map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}))});
+ const own=units.filter(u=>u.team==='player'&&!u.netRemote);
+ const packet={type:'snapshot',units:own.map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}))};
+ if(battleCfg&&battleCfg.coop&&onlineSession.teamIndex===0){
+  packet.enemyUnits=units.filter(u=>u.team==='enemy'&&!u.netRemote).map(u=>({x:u.mesh.position.x,y:u.mesh.position.y,z:u.mesh.position.z,yaw:u.mesh.rotation.y,hp:u.hp,max:u.max,alive:u.alive}));
+ }
+ netSend(packet);
 }
 
 let TELE=[];const tele=(x,z,r,ms,team)=>TELE.push({x,z,r,t:performance.now()+ms,team});
@@ -3501,27 +3536,44 @@ menuG.visible=false;battleG.visible=true;mode='battle';
 camYaw=0;camPitch=.62;lockOn=false;lockTgt=null;camera.fov=innerWidth<700?88:66;camera.updateProjectionMatrix();
 clearKeys();
 const savedTeam=Array.from(new Set((state.team||[]).filter(id=>id&&byId(id)))).slice(0,3);
-const teamIds=cfg.type==='royale'
- ? [savedTeam[0]||state.owned.find(id=>byId(id))].filter(Boolean)
- : savedTeam.slice();
-if(cfg.type!=='royale'){
+const soloQueue=cfg.online&&['survival','raid','royale'].includes(cfg.type);
+const teamIds=(cfg.type==='royale'||soloQueue)?[savedTeam[0]||state.owned.find(id=>byId(id))].filter(Boolean):savedTeam.slice();
+if(!soloQueue&&cfg.type!=='royale'){
  const reserve=state.owned.filter(id=>byId(id)&&!teamIds.includes(id));
  while(teamIds.length<3&&reserve.length)teamIds.push(reserve.shift());
  state.team=teamIds.slice(0,3);save();
 }
-teamIds.forEach((id,i)=>{
+teamIds.forEach((id)=>{
 const u=makeUnit(byId(id),'player',1);
 mulU(u,{dmg:curLv.mod.allDmg,hp:curLv.mod.playerHp});
 units.push(u);
 });
+onlineSession.remoteUnits=[];onlineSession.remoteUnitsByTeam={};
+if(cfg.online&&Array.isArray(cfg.onlineOpponentIds)){
+ const enemyIndex=onlineSession.teamIndex===0?1:0;
+ cfg.onlineOpponentIds.map(byId).filter(Boolean).slice(0,3).forEach((def,i)=>{
+  const u=makeUnit(def,'enemy',1);u.netRemote=true;u.netTeamIndex=enemyIndex;u.netUnitIndex=i;units.push(u);onlineSession.remoteUnits.push(u);
+ });
+ onlineSession.remoteUnitsByTeam[enemyIndex]=onlineSession.remoteUnits;
+}
+if(cfg.online&&Array.isArray(cfg.onlineTeam)){
+ cfg.onlineTeam.forEach((member,i)=>{
+  if(i===onlineSession.teamIndex)return;
+  const def=byId((member.roster||[])[0]);if(!def)return;
+  const u=makeUnit(def,'enemy',1);
+  if(cfg.coop){u.team='player';u.bar.classList.remove('en');}
+  else{u.team='rival_'+i;}
+  u.netRemote=true;u.netTeamIndex=i;u.netUnitIndex=0;units.push(u);
+  onlineSession.remoteUnits.push(u);onlineSession.remoteUnitsByTeam[i]=[u];
+ });
+}
 formUp('player');
 activeIdx=0;
 const sc=stageCfg(cfg.idx);
 const modeNames={stage:'ЭТАП '+cfg.idx,team:'КОМАНДНЫЙ БОЙ',survival:'ВЫЖИВАНИЕ · ВОЛНА 1',royale:'КОРОЛЕВСКАЯ БИТВА',raid:'РЕЙД НА БОССА',tournament:'ТУРНИР · РАУНД 1',ranked:'РЕЙТИНГОВЫЙ БОЙ'};
 $('#battleLabel').textContent=curLv.biome.name+' · '+(modeNames[cfg.type]||'БОЙ');
-if(cfg.type==='ranked'&&cfg.online){
- const roster=(cfg.rankedOpponentIds||[]).map(byId).filter(Boolean).slice(0,3);
- roster.forEach((d)=>{const u=makeUnit(d,'enemy',1);units.push(u);onlineSession.remoteUnits.push(u);});
+if(cfg.online&&(cfg.type==='royale'||Array.isArray(cfg.onlineOpponentIds))){
+ // All opponents were instantiated from the server's matched room.
 }else if(cfg.type==='stage'){
  const pool=CHARS.filter(c=>c.rar>=sc.minR&&c.rar<=sc.maxR);
  const r2=rng(curLv.seed+5),md=curLv.mod;
@@ -3604,8 +3656,18 @@ function advanceModeWave(){
   units.filter(u=>u.team!=='player'&&!u.alive).forEach(u=>{unitsG.remove(u.mesh);if(u.bar)u.bar.remove();});
   units=units.filter(u=>u.team==='player'||u.alive);
   battleCfg.wave=(battleCfg.wave||1)+1;
-  const sc=stageCfg(battleCfg.idx);spawnModeEnemies(battleCfg,curLv,sc);formUp('enemy');buildEnemyPorts();
-  battleOver=false;banner((battleCfg.type==='survival'?'ВОЛНА ':'РАУНД ')+battleCfg.wave,'ПРОТИВНИКИ УСИЛЕНЫ · СОХРАНИ ЗДОРОВЬЕ');
+  if(battleCfg.online&&Array.isArray(battleCfg.onlineOpponentIds)){
+   onlineSession.remoteUnits=[];
+   const enemyIndex=onlineSession.teamIndex===0?1:0;
+   battleCfg.onlineOpponentIds.map(byId).filter(Boolean).slice(0,3).forEach((def,i)=>{
+    const u=makeUnit(def,'enemy',1);u.netRemote=true;u.netTeamIndex=enemyIndex;u.netUnitIndex=i;units.push(u);onlineSession.remoteUnits.push(u);
+   });
+   onlineSession.remoteUnitsByTeam[enemyIndex]=onlineSession.remoteUnits;
+  }else{
+   const sc=stageCfg(battleCfg.idx);spawnModeEnemies(battleCfg,curLv,sc);
+  }
+  formUp('enemy');buildEnemyPorts();
+  battleOver=false;banner((battleCfg.type==='survival'?'ВОЛНА ':'РАУНД ')+battleCfg.wave,'ПРОТИВНИКИ УСИЛЕНЫ · ЗДОРОВЬЕ СОХРАНЕНО');
  },1100);
 }
 function roleOf(u){return u.role;}
@@ -3633,7 +3695,7 @@ function buildEnemyPorts(){
  $('#enemyPorts').innerHTML=foes.map((u,i)=>'<div class="enemyPort" id="enemyPort'+i+'">'+face(u.def)+'<span class="enemyHp"><i class="enemyHpf" style="width:100%"></i></span></div>').join('');
 }
 function buildPorts(){
-const ids=(mode==='battle'?units.filter(u=>u.team==='player').map(u=>u.def.id):state.team.filter(Boolean));
+const ids=(mode==='battle'?units.filter(u=>u.team==='player'&&!u.netRemote).map(u=>u.def.id):state.team.filter(Boolean));
 $('#ports').innerHTML=ids.map((id,i)=>{
 const d=byId(id);
 return '<button class="port" id="port'+i+'" onclick="bSwitch('+i+')">'+face(d)+'<span class="key">'+(i+1)+'</span><span class="hp"><i class="hpf" style="width:100%"></i></span></button>';
@@ -3647,7 +3709,7 @@ function updateHints(){
 if(state.control==='pc')$('#hints').innerHTML='<b>WASD / стрелки</b> ходьба · <b>Ё</b> захват курсора (без захвата — держи <b>ЛКМ</b> и веди мышь) · <b>ЛКМ / C</b> атака · <b>E / F / R / G</b> умение · <b>SPACE / кнопка</b> рывок · <b>X / удержание</b> защита и контратака · <b>1 2 3</b> смена бойца · <b>V</b> камера от 3 лица · <b>Q / Tab</b> захват цели';
 else $('#hints').innerHTML='<b>СТИК СЛЕВА</b> ходьба · <b>СВАЙП ПО ЭКРАНУ</b> обзор · кнопки справа — атака, умение, рывок';
 }
-function playerUnit(){return units.filter(u=>u.team==='player')[activeIdx];}
+function playerUnit(){return units.filter(u=>u.team==='player'&&!u.netRemote)[activeIdx];}
 /* combat */
 function nearest(u,team){
 let best=null,bd=1e9;
@@ -3756,7 +3818,10 @@ if(src&&src.team==='player'&&opts.basicAttack){
  if(src.comboCount===3){comboMilestone=3;dmg*=1.04;}else if(src.comboCount===5){comboMilestone=5;dmg*=1.07;}else if(src.comboCount===8){comboMilestone=8;dmg*=1.1;}
  state.attacks=(state.attacks||0)+1;updateTaskProgress('attack');
 }
-if(onlineSession.active&&battleCfg&&battleCfg.online&&src&&src.team==='player'&&tgt.team==='enemy'){const ti=onlineSession.remoteUnits.indexOf(tgt);if(ti>=0)netSend({type:'hit',target:ti,damage:dmg});}
+if(onlineSession.active&&battleCfg&&battleCfg.online&&src){
+ if(tgt.netRemote)netSend({type:'hit',targetType:'player',targetTeamIndex:tgt.netTeamIndex,targetUnitIndex:tgt.netUnitIndex||0,damage:dmg});
+ else if(battleCfg.coop&&src.team==='player'&&tgt.team==='enemy'){const ti=units.filter(u=>u.team==='enemy'&&!u.netRemote).indexOf(tgt);if(ti>=0)netSend({type:'hit',targetType:'enemy',target:ti,damage:dmg});}
+}
 tgt.hp-=dmg;
 if(tgt.isBoss&&tgt.alive){
  const phase=tgt.hp/tgt.max<=.33?3:(tgt.hp/tgt.max<=.66?2:1);
@@ -4204,7 +4269,7 @@ if(document.pointerLockElement)document.exitPointerLock();
 state.matches=(state.matches||0);updateTaskProgress('match');
 if(win){state.wins++;updateTaskProgress('win');}else state.losses++;
 const completedCfg=Object.assign({},battleCfg),type=completedCfg.type||'stage',n=completedCfg.idx;
-if(type==='ranked'&&completedCfg.online){netSend({type:'leave'});onlineSession.active=false;onlineSession.remoteUnits=[];if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}onlineSession.ws=null;}}
+if(completedCfg.online){netSend({type:'leave'});onlineSession.active=false;onlineSession.remoteUnits=[];onlineSession.remoteUnitsByTeam={};if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}onlineSession.ws=null;}}
 const modeNames={stage:'Этап '+n+' · '+stageName(n),team:'Командный бой',survival:'Выживание · 5 волн',royale:'Королевская битва',raid:'Рейд на босса',tournament:'Турнир · 3 раунда',ranked:'Рейтинговый бой'};
 let rw=type==='stage'?stageReward(n,!state.cleared[n],levelInfo(n).boss):({team:{coins:120,cry:25},survival:{coins:200,cry:50},royale:{coins:160,cry:40},raid:{coins:260,cry:80},tournament:{coins:220,cry:60},ranked:{coins:140,cry:25}}[type]||{coins:80,cry:15});
 const ratingBefore=Number(state.rating)||1000;let ratingDelta=0;if(type==='ranked'){ratingDelta=win?25:-18;state.rating=Math.max(0,ratingBefore+ratingDelta);}
@@ -4214,7 +4279,7 @@ if(type==='stage'){if(win&&!state.cleared[n])state.cleared[n]=1;if(win&&n===stat
 else{state.modeStats[type]=(state.modeStats[type]||0)+1;if(win)state.modeWins[type]=(state.modeWins[type]||0)+1;}
 if(type==='tournament'){if(win){state.tournamentPoints=Math.max(0,state.tournamentPoints+100);state.tournamentWins=(state.tournamentWins||0)+1;}else{state.tournamentPoints=Math.max(0,state.tournamentPoints-35);state.tournamentLosses=(state.tournamentLosses||0)+1;}}
 const xpBase={stage:90,team:100,survival:145,royale:120,raid:190,tournament:165,ranked:135}[type]||80,xpAward=win?xpBase:Math.round(xpBase*.35);
-const levels=[];units.filter(u=>u.team==='player').forEach(u=>{const gained=grantHeroXP(u.def.id,xpAward);if(gained)levels.push(u.def.name+' +'+gained+' ур.');});
+const levels=[];units.filter(u=>u.team==='player'&&!u.netRemote).forEach(u=>{const gained=grantHeroXP(u.def.id,xpAward);if(gained)levels.push(u.def.name+' +'+gained+' ур.');});
 state.playSeconds=(state.playSeconds||0)+Math.max(0,QA.simT||0);
 const lines=win?('Монеты: +'+coins+'<br>Кристаллы: +'+cry+'<br>Опыт каждому бойцу: +'+xpAward+' XP'+(levels.length?'<br>Повышение уровня: '+levels.join(', '):'')):'Награды за победу не получены<br>Опыт каждому бойцу: +'+xpAward+' XP'+(levels.length?'<br>Повышение уровня: '+levels.join(', '):'');
 if(win){state.coins+=coins;state.crystals+=cry;}
@@ -4243,7 +4308,7 @@ if(document.pointerLockElement)document.exitPointerLock();
 show('menu');
 };
 window.bSwitch=function(i){
-const ps=units.filter(u=>u.team==='player');
+const ps=units.filter(u=>u.team==='player'&&!u.netRemote);
 if(ps[i]&&ps[i].alive&&i!==activeIdx){activeIdx=i;say2(ps[i].def.name);buildPorts();SND.sfx('swap');}
 };
 window.bAttack=function(){const u=playerUnit();if(u)tryAttack(u);};
@@ -4518,7 +4583,7 @@ camera.lookAt(mx,1.3,0);
 if(featMesh){featMesh.rotation.y+=dt*.4;featMesh.position.y=featBase+Math.sin(now/600)*.03;}
 menuG.userData.dust.opacity=.35+Math.sin(now/900)*.15;
 }else{
-const ps=units.filter(u=>u.team==='player');
+const ps=units.filter(u=>u.team==='player'&&!u.netRemote);
 if(!battleOver)QA.simT+=dt;
 if(!battleOver&&mode==='battle'){
  if(!arenaHazard.active){arenaHazard.t-=dt;if(arenaHazard.t<=0){const live=units.filter(u=>u.alive);const target=live.length?live[Math.floor(Math.random()*live.length)]:null;const hp=target?target.mesh.position:null;arenaHazard.x=hp?hp.x:(Math.random()-.5)*12;arenaHazard.z=hp?hp.z:(Math.random()-.5)*12;arenaHazard.active=true;arenaHazard.warn=1.25;hazardIndicator.position.set(arenaHazard.x,.09,arenaHazard.z);hazardIndicator.visible=true;tele(arenaHazard.x,arenaHazard.z,arenaHazard.r,1450,'hazard');say2('ВНИМАНИЕ: ОПАСНАЯ ЗОНА');}}
@@ -4551,7 +4616,7 @@ if(u.fx.burn>0){u.fx.burn-=dt;u.hp-=u.fx.dps*dt;if(u.hp<=0){u.hp=0;u.alive=false
 if(curLv&&curLv.mod.regen&&u.team!=='player')u.hp=Math.min(u.max,u.hp+u.max*curLv.mod.regen*dt);
 if(u.def.id==='vega'){u.healT-=dt;if(u.healT<=0){u.healT=5;units.forEach(t=>{if(t.team===u.team&&t.alive&&t.mesh.position.distanceTo(u.mesh.position)<8)healUnit(t,t.max*.05,u);});}}
 let mvx=0,mvz=0,moving=false;
-const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&u.team==='enemy'&&u.netTarget;
+const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&(u.netRemote||u.netDriven)&&u.netTarget;
 if(onlineRemote){
  const nt=u.netTarget,dx=nt.x-u.mesh.position.x,dz=nt.z-u.mesh.position.z,dist=Math.hypot(dx,dz);
  const blend=1-Math.exp(-dt*20);
@@ -4559,7 +4624,7 @@ if(onlineRemote){
  if(dist>.035){mvx=dx/dist;mvz=dz/dist;moving=true;}
 }
 const isPlayer=(u.team==='player'&&ps[activeIdx]===u)&&!QA.auto;
-if(!isPlayer&&!(onlineSession.active&&battleCfg&&battleCfg.online&&u.team==='enemy')){
+if(!isPlayer&&!u.netRemote&&!u.netDriven&&!(battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex!==0&&u.team==='enemy')){
 const ai=u.ai;
 ai.dodgeCd-=dt;
 u.aiT-=dt;
