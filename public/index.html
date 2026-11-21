@@ -1011,7 +1011,7 @@ function tournamentRank(points){
 }
 
 let cloudSyncReady=false,cloudToken=null,cloudSaveTimer=null;
-const CLOUD_API='https://intergalactic-wars-online.vladimirpolukeev8.workers.dev';
+const CLOUD_API=location.hostname.endsWith('.workers.dev')&&location.hostname.startsWith('telegram-account-foundation-')?'https://telegram-account-foundation-intergalactic-wars-online.vladimirpolukeev8.workers.dev':'https://intergalactic-wars-online.vladimirpolukeev8.workers.dev';
 async function putCloudProfile(){
  if(!cloudToken)return;
  state._cloudUpdatedAt=Date.now();
