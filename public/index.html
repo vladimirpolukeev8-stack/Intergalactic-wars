@@ -3413,33 +3413,59 @@ let onlineSession={active:false,ws:null,playerId:null,roomId:null,remoteUnits:[]
 function netSend(packet){try{if(onlineSession.ws&&onlineSession.ws.readyState===WebSocket.OPEN)onlineSession.ws.send(JSON.stringify(packet));}catch(e){}}
 function onlineRoster(){return Array.from(new Set((state.team||[]).filter(id=>id&&byId(id)))).slice(0,3);}
 function connectRankedOnline(options={}){
- const own=onlineRoster();if(!own.length){say2('СОБЕРИ ОТРЯД');show('team');return;}
- if(own.length<3){const extra=state.owned.filter(id=>byId(id)&&!own.includes(id));while(own.length<3&&extra.length)own.push(extra.shift());}
+ const arenaType=options.arenaType||'ranked',single=['survival','raid','royale'].includes(arenaType);
+ const own=single?[onlineRoster()[0]||state.owned.find(id=>byId(id))].filter(Boolean):onlineRoster();
+ if(!own.length){say2('СНАЧАЛА СОБЕРИ ОТРЯД');show('team');return;}
+ if(!single&&own.length<3){const extra=state.owned.filter(id=>byId(id)&&!own.includes(id));while(own.length<3&&extra.length)own.push(extra.shift());}
  if(!window.WebSocket||!window.crypto||!crypto.randomUUID){say2('БРАУЗЕР НЕ ПОДДЕРЖИВАЕТ ОНЛАЙН');return;}
  if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}}
- const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],lastSend:0,peerId:null,inviteId:options.inviteId||null};
- say2(options.ticket?'ПОДКЛЮЧЕНИЕ К ДРУГУ…':'ПОИСК РЕАЛЬНОГО СОПЕРНИКА…');
+ const queueMode=arenaType==='royale'?'battle_royale':(['survival','raid'].includes(arenaType)?'boss_coop':'ranked_duel');
+ const playerId=crypto.randomUUID().replace(/-/g,'');onlineSession={active:false,ws:null,playerId,roomId:null,remoteUnits:[],remoteUnitsByTeam:{},lastSend:0,peerId:null,inviteId:options.inviteId||null,teamIndex:0,arenaType};
+ say2(options.ticket?'ПОДКЛЮЧЕНИЕ К ДРУГУ…':'ПОИСК ИГРОКОВ · '+({team:'КОМАНДНЫЙ БОЙ',survival:'ВЫЖИВАНИЕ',royale:'КОРОЛЕВСКАЯ БИТВА',raid:'РЕЙД НА БОССА',tournament:'ТУРНИР',ranked:'РЕЙТИНГ'}[arenaType]||'ОНЛАЙН'));
  const url=new URL('wss://intergalactic-wars-online.vladimirpolukeev8.workers.dev/ws');
  url.searchParams.set('playerId',playerId);url.searchParams.set('rating',String(Number(state.rating)||1000));url.searchParams.set('roster',JSON.stringify(own));
- if(options.ticket)url.searchParams.set('ticket',options.ticket);
+ url.searchParams.set('mode',queueMode);url.searchParams.set('arenaType',arenaType);
+ if(options.ticket){url.searchParams.set('ticket',options.ticket);url.searchParams.set('arenaType','friend');}
  const ws=new WebSocket(url.toString());onlineSession.ws=ws;let everMatched=false;
  ws.onmessage=(ev)=>{let m;try{m=JSON.parse(ev.data);}catch(e){return;}
-  if(m.type==='waiting'){say2('ПОИСК СОПЕРНИКА… РЕЙТИНГ '+m.rating);return;}
+  if(m.type==='waiting'){say2('ОЧЕРЕДЬ · '+(m.playersFound||1)+' / '+(m.playersNeeded||2)+' ИГРОКОВ');return;}
   if(m.type==='matched'){
    if(onlineSession.active)return;
-   const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
-   if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
-   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
-   say2('СОПЕРНИК НАЙДЕН · РЕЙТИНГ '+m.opponent.rating);
-   startBattle({type:'ranked',idx:state.stage,wave:1,online:true,rankedOpponentRating:m.opponent.rating,rankedOpponentIds:opp});
+   everMatched=true;onlineSession.active=true;onlineSession.roomId=m.roomId;onlineSession.teamIndex=Number(m.teamIndex)||0;
+   if(m.mode==='ranked_duel'){
+    const opp=Array.isArray(m.opponent&&m.opponent.roster)?m.opponent.roster.filter(id=>byId(id)).slice(0,3):[];
+    if(!opp.length){say2('ОШИБКА СОСТАВА СОПЕРНИКА');ws.close();return;}
+    onlineSession.peerId=m.opponent.playerId;onlineSession.remoteUnits=[];
+    say2('ИГРОК НАЙДЕН · НАЧИНАЕМ БОЙ');
+    const type=arenaType==='friend'?'ranked':arenaType;
+    startBattle({type,idx:state.stage,wave:1,online:true,onlineOpponentIds:opp,rankedOpponentIds:opp,rankedOpponentRating:m.opponent.rating,onlineArenaType:arenaType});
+   }else{
+    const team=Array.isArray(m.team)?m.team:[];
+    if(team.length!==(m.mode==='battle_royale'?6:3)){say2('ОШИБКА СОСТАВА КОМНАТЫ');ws.close();return;}
+    onlineSession.peerId=null;onlineSession.remoteUnits=[];
+    say2('КОМНАТА СОБРАНА · '+team.length+' ИГРОКОВ');
+    startBattle({type:arenaType,idx:state.stage,wave:1,online:true,coop:['survival','raid'].includes(arenaType),onlineTeam:team,onlineArenaType:arenaType});
+   }
    return;
   }
   if(m.type==='peer-event'&&m.event){const e=m.event;
-   if(e.type==='snapshot'&&onlineSession.active){const list=Array.isArray(e.units)?e.units:[];list.forEach((v,i)=>{const u=onlineSession.remoteUnits[i];if(!u||!v)return;const num=(x,f=0)=>Number.isFinite(Number(x))?Number(x):f;u.netTarget={x:num(v.x),y:num(v.y),z:num(v.z),yaw:num(v.yaw)};u.ai.face=u.netTarget.yaw;if(Number.isFinite(Number(v.max))&&Number(v.max)>0)u.max=Number(v.max);u.hp=Math.max(0,Math.min(u.max,num(v.hp)));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});checkEnd();}
-   if(e.type==='hit'&&onlineSession.active){const t=units.filter(u=>u.team==='player')[Math.max(0,Math.min(2,e.target|0))];if(t&&t.alive){t.hp=Math.max(0,t.hp-Math.max(0,Number(e.damage)||0));if(t.hp<=0){t.alive=false;t.deathT=0;if(t.bar)t.bar.style.display='none';checkEnd();}}}
+   if(e.type==='snapshot'&&onlineSession.active){
+    const remoteSet=onlineSession.remoteUnitsByTeam&&onlineSession.remoteUnitsByTeam[m.teamIndex]||onlineSession.remoteUnits;
+    const list=Array.isArray(e.units)?e.units:[];
+    list.forEach((v,i)=>{const u=remoteSet[i];if(!u||!v)return;const num=(x,f=0)=>Number.isFinite(Number(x))?Number(x):f;u.netTarget={x:num(v.x),y:num(v.y),z:num(v.z),yaw:num(v.yaw)};u.ai.face=u.netTarget.yaw;if(Number.isFinite(Number(v.max))&&Number(v.max)>0)u.max=Number(v.max);u.hp=Math.max(0,Math.min(u.max,num(v.hp)));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});
+    if(Array.isArray(e.enemyUnits)&&battleCfg&&battleCfg.coop&&onlineSession.teamIndex!==0){const foes=units.filter(u=>u.team==='enemy'&&!u.netRemote);e.enemyUnits.forEach((v,i)=>{const u=foes[i];if(!u||!v)return;u.netTarget={x:Number(v.x)||0,y:Number(v.y)||0,z:Number(v.z)||0,yaw:Number(v.yaw)||0};u.hp=Math.max(0,Math.min(u.max,Number(v.hp)||0));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});}
+    checkEnd();
+   }
+   if(e.type==='hit'&&onlineSession.active){
+    let t=null;
+    if(e.targetType==='player'&&Number(e.targetTeamIndex)===onlineSession.teamIndex)t=units.filter(u=>u.team==='player'&&!u.netRemote)[Math.max(0,Math.min(2,e.targetUnitIndex|0))];
+    else if(e.targetType==='enemy')t=units.filter(u=>u.team==='enemy'&&!u.netRemote)[Math.max(0,e.target|0)];
+    else if(!e.targetType)t=units.filter(u=>u.team==='player'&&!u.netRemote)[Math.max(0,Math.min(2,e.target|0))];
+    if(t&&t.alive){t.hp=Math.max(0,t.hp-Math.max(0,Number(e.damage)||0));if(t.hp<=0){t.hp=0;t.alive=false;t.deathT=0;if(t.bar)t.bar.style.display='none';checkEnd();}}
+   }
    if(e.type==='leave'){handleOnlineOpponentExit('СОПЕРНИК ПОКИНУЛ БОЙ');}
   }
-  if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('СОПЕРНИК ОТКЛЮЧИЛСЯ');}
+  if(m.type==='opponent-disconnected'){handleOnlineOpponentExit('ИГРОК ОТКЛЮЧИЛСЯ',m.teamIndex);}
  };
  ws.onerror=()=>say2('ОШИБКА ПОДКЛЮЧЕНИЯ К СЕРВЕРУ');
  ws.onclose=()=>{if(!onlineSession.active){if(options.inviteId&&!everMatched)friendMatchStarting.delete(options.inviteId);say2('ПОИСК ПРЕРВАН · ПОДКЛЮЧЕНИЕ ЗАКРЫТО');}};
