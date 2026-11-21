@@ -3822,7 +3822,6 @@ if(onlineSession.active&&battleCfg&&battleCfg.online&&src){
  if(tgt.netRemote)netSend({type:'hit',targetType:'player',targetTeamIndex:tgt.netTeamIndex,targetUnitIndex:tgt.netUnitIndex||0,damage:dmg});
  else if(battleCfg.coop&&src.team==='player'&&tgt.team==='enemy'){const ti=units.filter(u=>u.team==='enemy'&&!u.netRemote).indexOf(tgt);if(ti>=0)netSend({type:'hit',targetType:'enemy',target:ti,damage:dmg});}
 }
-if(onlineSession.active&&battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex===0&&src&&src.team==='enemy'&&tgt.team==='player'&&tgt.netRemote){netSend({type:'hit',targetType:'player',targetTeamIndex:tgt.netTeamIndex,targetUnitIndex:0,damage:dmg});}
 tgt.hp-=dmg;
 if(tgt.isBoss&&tgt.alive){
  const phase=tgt.hp/tgt.max<=.33?3:(tgt.hp/tgt.max<=.66?2:1);
