@@ -410,6 +410,8 @@ export class AccountStore {
         if(member)return Response.json({error:"Ты уже состоишь в клане"},{status:409});
         const clan=this.ctx.storage.sql.exec("SELECT id FROM clans WHERE id=?",id).toArray()[0];
         if(!clan)return Response.json({error:"Клан не найден"},{status:404});
+        const size=this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM clan_members WHERE clan_id=?",id).toArray()[0]?.n||0;
+        if(size>=50)return Response.json({error:"В клане уже 50 участников"},{status:409});
         this.ctx.storage.sql.exec("INSERT INTO clan_members (clan_id,telegram_id,role,joined_at) VALUES (?,?,'member',?)",id,me,now);
         return Response.json({ok:true});
       }
@@ -442,6 +444,8 @@ export class AccountStore {
         if(accept){
           const member=this.ctx.storage.sql.exec("SELECT telegram_id FROM clan_members WHERE telegram_id=?",me).toArray()[0];
           if(member)return Response.json({error:"Ты уже состоишь в клане"},{status:409});
+          const size=this.ctx.storage.sql.exec("SELECT COUNT(*) AS n FROM clan_members WHERE clan_id=?",invite.clan_id).toArray()[0]?.n||0;
+          if(size>=50)return Response.json({error:"В клане уже 50 участников"},{status:409});
           this.ctx.storage.sql.exec("INSERT INTO clan_members (clan_id,telegram_id,role,joined_at) VALUES (?,?,'member',?)",invite.clan_id,me,now);
         }
         this.ctx.storage.sql.exec("UPDATE clan_invites SET status=? WHERE id=? AND to_id=?",accept?"accepted":"declined",id,me);
