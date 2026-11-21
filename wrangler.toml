@@ -17,3 +17,12 @@ new_sqlite_classes = ["Matchmaker"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["AccountStore"]
+[previews]
+
+[[previews.durable_objects.bindings]]
+name = "MATCHMAKER"
+class_name = "Matchmaker"
+
+[[previews.durable_objects.bindings]]
+name = "ACCOUNT_STORE"
+class_name = "AccountStore"
