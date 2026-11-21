@@ -2936,6 +2936,7 @@ let lastPresenceHeartbeat=0;
 const friendMatchStarting=new Set();
 async function beginFriendBattle(inviteId){
  if(!inviteId||friendMatchStarting.has(inviteId)||onlineSession.active||mode==='battle')return;
+ if(!onlineRoster().length){say2('СОБЕРИ ОТРЯД');show('team');return;}
  friendMatchStarting.add(inviteId);
  try{
   const issued=await socialRequest('/battle-invites/ticket',{inviteId});
