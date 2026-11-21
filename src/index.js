@@ -441,7 +441,7 @@ export class AccountStore {
         const ticket=btoa(String.fromCharCode(...raw)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/g,"");
         const hashBytes=new Uint8Array(await crypto.subtle.digest("SHA-256",new TextEncoder().encode(ticket)));
         const tokenHash=[...hashBytes].map(v=>v.toString(16).padStart(2,"0")).join("");
-        this.ctx.storage.sql.exec("DELETE FROM match_tickets WHERE invite_id=? AND user_id=? AND consumed_at=0",id,me);
+        this.ctx.storage.sql.exec("DELETE FROM match_tickets WHERE invite_id=? AND user_id=?",id,me);
         this.ctx.storage.sql.exec("INSERT INTO match_tickets (token_hash,invite_id,user_id,peer_id,mode,expires_at,consumed_at) VALUES (?,?,?,?,?,?,0)",tokenHash,id,me,peerId,invite.mode,now+90000);
         return Response.json({ok:true,ticket,mode:invite.mode,expiresAt:now+90000});
       }
