@@ -3453,7 +3453,7 @@ function connectRankedOnline(options={}){
     const remoteSet=onlineSession.remoteUnitsByTeam&&onlineSession.remoteUnitsByTeam[m.teamIndex]||onlineSession.remoteUnits;
     const list=Array.isArray(e.units)?e.units:[];
     list.forEach((v,i)=>{const u=remoteSet[i];if(!u||!v)return;const num=(x,f=0)=>Number.isFinite(Number(x))?Number(x):f;u.netTarget={x:num(v.x),y:num(v.y),z:num(v.z),yaw:num(v.yaw)};u.ai.face=u.netTarget.yaw;if(Number.isFinite(Number(v.max))&&Number(v.max)>0)u.max=Number(v.max);u.hp=Math.max(0,Math.min(u.max,num(v.hp)));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});
-    if(Array.isArray(e.enemyUnits)&&battleCfg&&battleCfg.coop&&onlineSession.teamIndex!==0){const foes=units.filter(u=>u.team==='enemy'&&!u.netRemote);e.enemyUnits.forEach((v,i)=>{const u=foes[i];if(!u||!v)return;u.netTarget={x:Number(v.x)||0,y:Number(v.y)||0,z:Number(v.z)||0,yaw:Number(v.yaw)||0};u.hp=Math.max(0,Math.min(u.max,Number(v.hp)||0));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});}
+    if(Array.isArray(e.enemyUnits)&&battleCfg&&battleCfg.coop&&onlineSession.teamIndex!==0){const foes=units.filter(u=>u.team==='enemy'&&!u.netRemote);e.enemyUnits.forEach((v,i)=>{const u=foes[i];if(!u||!v)return;u.netDriven=true;u.netTarget={x:Number(v.x)||0,y:Number(v.y)||0,z:Number(v.z)||0,yaw:Number(v.yaw)||0};u.hp=Math.max(0,Math.min(u.max,Number(v.hp)||0));if(v.alive===false&&u.alive){u.alive=false;u.deathT=0;if(u.bar)u.bar.style.display='none';}});}
     checkEnd();
    }
    if(e.type==='hit'&&onlineSession.active){
@@ -4621,7 +4621,7 @@ if(u.fx.burn>0){u.fx.burn-=dt;u.hp-=u.fx.dps*dt;if(u.hp<=0){u.hp=0;u.alive=false
 if(curLv&&curLv.mod.regen&&u.team!=='player')u.hp=Math.min(u.max,u.hp+u.max*curLv.mod.regen*dt);
 if(u.def.id==='vega'){u.healT-=dt;if(u.healT<=0){u.healT=5;units.forEach(t=>{if(t.team===u.team&&t.alive&&t.mesh.position.distanceTo(u.mesh.position)<8)healUnit(t,t.max*.05,u);});}}
 let mvx=0,mvz=0,moving=false;
-const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&u.netRemote&&u.netTarget;
+const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&(u.netRemote||u.netDriven)&&u.netTarget;
 if(onlineRemote){
  const nt=u.netTarget,dx=nt.x-u.mesh.position.x,dz=nt.z-u.mesh.position.z,dist=Math.hypot(dx,dz);
  const blend=1-Math.exp(-dt*20);
@@ -4629,7 +4629,7 @@ if(onlineRemote){
  if(dist>.035){mvx=dx/dist;mvz=dz/dist;moving=true;}
 }
 const isPlayer=(u.team==='player'&&ps[activeIdx]===u)&&!QA.auto;
-if(!isPlayer&&!u.netRemote&&!(battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex!==0&&u.team==='enemy')){
+if(!isPlayer&&!u.netRemote&&!u.netDriven&&!(battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex!==0&&u.team==='enemy')){
 const ai=u.ai;
 ai.dodgeCd-=dt;
 u.aiT-=dt;
