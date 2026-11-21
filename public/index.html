@@ -3533,27 +3533,46 @@ menuG.visible=false;battleG.visible=true;mode='battle';
 camYaw=0;camPitch=.62;lockOn=false;lockTgt=null;camera.fov=innerWidth<700?88:66;camera.updateProjectionMatrix();
 clearKeys();
 const savedTeam=Array.from(new Set((state.team||[]).filter(id=>id&&byId(id)))).slice(0,3);
-const teamIds=cfg.type==='royale'
- ? [savedTeam[0]||state.owned.find(id=>byId(id))].filter(Boolean)
- : savedTeam.slice();
-if(cfg.type!=='royale'){
+const soloQueue=cfg.online&&['survival','raid','royale'].includes(cfg.type);
+const teamIds=(cfg.type==='royale'||soloQueue)?[savedTeam[0]||state.owned.find(id=>byId(id))].filter(Boolean):savedTeam.slice();
+if(!soloQueue&&cfg.type!=='royale'){
  const reserve=state.owned.filter(id=>byId(id)&&!teamIds.includes(id));
  while(teamIds.length<3&&reserve.length)teamIds.push(reserve.shift());
  state.team=teamIds.slice(0,3);save();
 }
-teamIds.forEach((id,i)=>{
+teamIds.forEach((id)=>{
 const u=makeUnit(byId(id),'player',1);
 mulU(u,{dmg:curLv.mod.allDmg,hp:curLv.mod.playerHp});
 units.push(u);
 });
+onlineSession.remoteUnits=[];onlineSession.remoteUnitsByTeam={};
+if(cfg.online&&Array.isArray(cfg.onlineOpponentIds)){
+ const enemyIndex=onlineSession.teamIndex===0?1:0;
+ cfg.onlineOpponentIds.map(byId).filter(Boolean).slice(0,3).forEach((def,i)=>{
+  const u=makeUnit(def,'enemy',1);u.netRemote=true;u.netTeamIndex=enemyIndex;u.netUnitIndex=i;units.push(u);onlineSession.remoteUnits.push(u);
+ });
+ onlineSession.remoteUnitsByTeam[enemyIndex]=onlineSession.remoteUnits;
+}
+if(cfg.online&&Array.isArray(cfg.onlineTeam)){
+ cfg.onlineTeam.forEach((member,i)=>{
+  if(i===onlineSession.teamIndex)return;
+  const def=byId((member.roster||[])[0]);if(!def)return;
+  const u=makeUnit(def,'enemy',1);
+  if(cfg.coop){u.team='player';u.bar.classList.remove('en');}
+  else{u.team='rival_'+i;}
+  u.netRemote=true;u.netTeamIndex=i;u.netUnitIndex=0;units.push(u);
+  onlineSession.remoteUnits.push(u);onlineSession.remoteUnitsByTeam[i]=[u];
+ });
+}
 formUp('player');
 activeIdx=0;
 const sc=stageCfg(cfg.idx);
 const modeNames={stage:'ЭТАП '+cfg.idx,team:'КОМАНДНЫЙ БОЙ',survival:'ВЫЖИВАНИЕ · ВОЛНА 1',royale:'КОРОЛЕВСКАЯ БИТВА',raid:'РЕЙД НА БОССА',tournament:'ТУРНИР · РАУНД 1',ranked:'РЕЙТИНГОВЫЙ БОЙ'};
 $('#battleLabel').textContent=curLv.biome.name+' · '+(modeNames[cfg.type]||'БОЙ');
-if(cfg.type==='ranked'&&cfg.online){
- const roster=(cfg.rankedOpponentIds||[]).map(byId).filter(Boolean).slice(0,3);
- roster.forEach((d)=>{const u=makeUnit(d,'enemy',1);units.push(u);onlineSession.remoteUnits.push(u);});
+if(cfg.online&&cfg.type==='royale'){
+ // The six queued human players are the entire free-for-all lobby.
+}else if(cfg.online&&Array.isArray(cfg.onlineOpponentIds)){
+ // The opponent roster was created from the matched player's account.
 }else if(cfg.type==='stage'){
  const pool=CHARS.filter(c=>c.rar>=sc.minR&&c.rar<=sc.maxR);
  const r2=rng(curLv.seed+5),md=curLv.mod;
@@ -3665,7 +3684,7 @@ function buildEnemyPorts(){
  $('#enemyPorts').innerHTML=foes.map((u,i)=>'<div class="enemyPort" id="enemyPort'+i+'">'+face(u.def)+'<span class="enemyHp"><i class="enemyHpf" style="width:100%"></i></span></div>').join('');
 }
 function buildPorts(){
-const ids=(mode==='battle'?units.filter(u=>u.team==='player').map(u=>u.def.id):state.team.filter(Boolean));
+const ids=(mode==='battle'?units.filter(u=>u.team==='player'&&!u.netRemote).map(u=>u.def.id):state.team.filter(Boolean));
 $('#ports').innerHTML=ids.map((id,i)=>{
 const d=byId(id);
 return '<button class="port" id="port'+i+'" onclick="bSwitch('+i+')">'+face(d)+'<span class="key">'+(i+1)+'</span><span class="hp"><i class="hpf" style="width:100%"></i></span></button>';
@@ -3679,7 +3698,7 @@ function updateHints(){
 if(state.control==='pc')$('#hints').innerHTML='<b>WASD / стрелки</b> ходьба · <b>Ё</b> захват курсора (без захвата — держи <b>ЛКМ</b> и веди мышь) · <b>ЛКМ / C</b> атака · <b>E / F / R / G</b> умение · <b>SPACE / кнопка</b> рывок · <b>X / удержание</b> защита и контратака · <b>1 2 3</b> смена бойца · <b>V</b> камера от 3 лица · <b>Q / Tab</b> захват цели';
 else $('#hints').innerHTML='<b>СТИК СЛЕВА</b> ходьба · <b>СВАЙП ПО ЭКРАНУ</b> обзор · кнопки справа — атака, умение, рывок';
 }
-function playerUnit(){return units.filter(u=>u.team==='player')[activeIdx];}
+function playerUnit(){return units.filter(u=>u.team==='player'&&!u.netRemote)[activeIdx];}
 /* combat */
 function nearest(u,team){
 let best=null,bd=1e9;
@@ -4236,7 +4255,7 @@ if(document.pointerLockElement)document.exitPointerLock();
 state.matches=(state.matches||0);updateTaskProgress('match');
 if(win){state.wins++;updateTaskProgress('win');}else state.losses++;
 const completedCfg=Object.assign({},battleCfg),type=completedCfg.type||'stage',n=completedCfg.idx;
-if(type==='ranked'&&completedCfg.online){netSend({type:'leave'});onlineSession.active=false;onlineSession.remoteUnits=[];if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}onlineSession.ws=null;}}
+if(completedCfg.online){netSend({type:'leave'});onlineSession.active=false;onlineSession.remoteUnits=[];onlineSession.remoteUnitsByTeam={};if(onlineSession.ws){try{onlineSession.ws.close();}catch(e){}onlineSession.ws=null;}}
 const modeNames={stage:'Этап '+n+' · '+stageName(n),team:'Командный бой',survival:'Выживание · 5 волн',royale:'Королевская битва',raid:'Рейд на босса',tournament:'Турнир · 3 раунда',ranked:'Рейтинговый бой'};
 let rw=type==='stage'?stageReward(n,!state.cleared[n],levelInfo(n).boss):({team:{coins:120,cry:25},survival:{coins:200,cry:50},royale:{coins:160,cry:40},raid:{coins:260,cry:80},tournament:{coins:220,cry:60},ranked:{coins:140,cry:25}}[type]||{coins:80,cry:15});
 const ratingBefore=Number(state.rating)||1000;let ratingDelta=0;if(type==='ranked'){ratingDelta=win?25:-18;state.rating=Math.max(0,ratingBefore+ratingDelta);}
@@ -4583,7 +4602,7 @@ if(u.fx.burn>0){u.fx.burn-=dt;u.hp-=u.fx.dps*dt;if(u.hp<=0){u.hp=0;u.alive=false
 if(curLv&&curLv.mod.regen&&u.team!=='player')u.hp=Math.min(u.max,u.hp+u.max*curLv.mod.regen*dt);
 if(u.def.id==='vega'){u.healT-=dt;if(u.healT<=0){u.healT=5;units.forEach(t=>{if(t.team===u.team&&t.alive&&t.mesh.position.distanceTo(u.mesh.position)<8)healUnit(t,t.max*.05,u);});}}
 let mvx=0,mvz=0,moving=false;
-const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&u.team==='enemy'&&u.netTarget;
+const onlineRemote=onlineSession.active&&battleCfg&&battleCfg.online&&u.netRemote&&u.netTarget;
 if(onlineRemote){
  const nt=u.netTarget,dx=nt.x-u.mesh.position.x,dz=nt.z-u.mesh.position.z,dist=Math.hypot(dx,dz);
  const blend=1-Math.exp(-dt*20);
@@ -4591,7 +4610,7 @@ if(onlineRemote){
  if(dist>.035){mvx=dx/dist;mvz=dz/dist;moving=true;}
 }
 const isPlayer=(u.team==='player'&&ps[activeIdx]===u)&&!QA.auto;
-if(!isPlayer&&!(onlineSession.active&&battleCfg&&battleCfg.online&&u.team==='enemy')){
+if(!isPlayer&&!u.netRemote&&!(battleCfg&&battleCfg.online&&battleCfg.coop&&onlineSession.teamIndex!==0&&u.team==='enemy')){
 const ai=u.ai;
 ai.dodgeCd-=dt;
 u.aiT-=dt;
