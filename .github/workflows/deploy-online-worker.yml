@@ -1,0 +1,30 @@
+name: Deploy Intergalactic Wars online Worker
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/index.js"
+      - "wrangler.toml"
+      - ".github/workflows/deploy-online-worker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: intergalactic-wars-online-worker
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy online matchmaking and social API
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cloudflare/wrangler-action@v4
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: "4.166.0"
+          command: deploy --config wrangler.toml
