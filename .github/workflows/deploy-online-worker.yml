@@ -25,6 +25,13 @@ jobs:
       - uses: actions/checkout@v4
       - name: Validate online Worker JavaScript
         run: node --check src/index.js
+      - name: Verify Telegram token belongs to a valid bot (without exposing the token)
+        if: env.TELEGRAM_BOT_TOKEN != ''
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: |
+          BOT_INFO="$(curl -fsS "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe")"
+          echo "$BOT_INFO" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const r=JSON.parse(s);if(!r.ok)process.exit(1);console.log("Telegram token bot identity: id="+r.result.id+" username=@"+r.result.username)})'
       - name: Configure Telegram bot token when repository secret is available
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
