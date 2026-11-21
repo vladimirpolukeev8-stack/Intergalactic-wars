@@ -2911,7 +2911,7 @@ if(curScreen!=='battle'&&e.target.closest('button'))SND.sfx('click');
 const retry=e.target.closest('[data-social-retry]');if(retry){retry.disabled=true;retry.textContent='ПРОВЕРЯЕМ…';initializeTelegramAccount().then(()=>renderSocial()).catch(()=>renderSocial());return;}
 const g=e.target.closest('[data-go]');if(g){show(g.dataset.go);return;}
 const ranked=e.target.closest('[data-ranked-start]');if(ranked){startRankedMatch();return;}
-const gm=e.target.closest('[data-mode-start]');if(gm){if(!state.team.some(id=>id&&byId(id))){say2('СОБЕРИ ОТРЯД');show('team');return;}startBattle({type:gm.dataset.modeStart,idx:state.stage,wave:1});return;}
+const gm=e.target.closest('[data-mode-start]');if(gm){startArenaMode(gm.dataset.modeStart);return;}
 const st=e.target.closest('[data-stage]');if(st){startStage(+st.dataset.stage);return;}
 if(e.target.closest('.slot:not(.filled)'))say2('ВЫБЕРИ БОЙЦА НИЖЕ');
 });
@@ -3060,20 +3060,26 @@ document.querySelectorAll('[data-spage]').forEach(b=>b.onclick=()=>{stagePage=+b
 /* ---------- arena ---------- */
 function renderArena(){
  const modes=[
-  {id:'team',title:'КОМАНДНЫЙ БОЙ',desc:'Твой отряд против трёх противников. Побеждает команда, сохранившая бойцов.',meta:'3 НА 3',reward:'+120 монет · +25 кр.',art:'⚔'},
-  {id:'survival',title:'ВЫЖИВАНИЕ',desc:'Пять волн врагов подряд. Здоровье и состав твоего отряда сохраняются между волнами.',meta:'5 ВОЛН',reward:'+200 монет · +50 кр.',art:'♜'},
-  {id:'royale',title:'КОРОЛЕВСКАЯ БИТВА',desc:'Ты выходишь на арену одним бойцом против шести независимых соперников. Каждый сам выбирает цель и может атаковать других.',meta:'1 БОЕЦ · 6 СОПЕРНИКОВ',reward:'+160 монет · +40 кр.',art:'✦'},
-  {id:'raid',title:'РЕЙД НА БОССА',desc:'Сразись с огромным боссом и двумя его защитниками. Это самый сложный одиночный бой.',meta:'БОСС + 2 ЗАЩИТНИКА',reward:'+260 монет · +80 кр.',art:'☄'},
-  {id:'tournament',title:'ТУРНИР',desc:'Три последовательных раунда. В финале выйдет усиленный чемпион.',meta:'3 РАУНДА · ФИНАЛ',reward:'+220 монет · +60 кр.',art:'🏆'}
+  {id:'team',title:'КОМАНДНЫЙ БОЙ',desc:'Два реальных игрока. У каждого отряд из трёх персонажей.',meta:'2 ИГРОКА · 3 НА 3',reward:'+120 монет · +25 кр.',art:'⚔'},
+  {id:'survival',title:'ВЫЖИВАНИЕ',desc:'Три игрока вместе проходят пять волн противников.',meta:'3 ИГРОКА · 5 ВОЛН',reward:'+200 монет · +50 кр.',art:'♜'},
+  {id:'royale',title:'КОРОЛЕВСКАЯ БИТВА',desc:'Шесть реальных игроков. Каждый выходит одним персонажем и сражается сам за себя.',meta:'6 ИГРОКОВ · 1 БОЕЦ',reward:'+160 монет · +40 кр.',art:'✦'},
+  {id:'raid',title:'РЕЙД НА БОССА',desc:'Три игрока объединяются против босса и двух защитников.',meta:'3 ИГРОКА · БОСС',reward:'+260 монет · +80 кр.',art:'☄'},
+  {id:'tournament',title:'ТУРНИР',desc:'Два реальных игрока проводят серию из трёх раундов.',meta:'2 ИГРОКА · 3 РАУНДА',reward:'+220 монет · +60 кр.',art:'🏆'}
  ];
- $('#scr-arena').innerHTML='<div class="hRow"><div><h1>РЕЖИ<em>МЫ</em></h1><div class="sub">Выбери формат сражения. Все режимы доступны офлайн.</div></div><span class="tag">5 РЕЖИМОВ</span></div>'+
+ $('#scr-arena').innerHTML='<div class="hRow"><div><h1>РЕЖИ<em>МЫ</em></h1><div class="sub">Все пять режимов используют онлайн-подбор игроков.</div></div><span class="tag">5 ОНЛАЙН-РЕЖИМОВ</span></div>'+
  '<div class="modeGrid">'+modes.map(m=>'<article class="modeCard card glass"><div class="modeTop"><span class="modeArt">'+m.art+'</span><span class="tag">'+m.meta+'</span></div><h2>'+m.title+'</h2><p class="mut">'+m.desc+'</p><div class="modeBottom"><span class="modeReward">'+m.reward+'</span><button class="btn primary" data-mode-start="'+m.id+'">НАЧАТЬ</button></div><div class="modeStats">Побед: '+(state.modeWins[m.id]||0)+' · Боев: '+(state.modeStats[m.id]||0)+'</div></article>').join('')+'</div>'+
  '<div class="card glass" style="margin-top:16px"><div class="hRow"><div><h2>ТУРНИРНАЯ ЛИГА</h2><div class="sub">Рейтинг за победы в трёхраундовых турнирах</div></div><span class="tag">'+tournamentRank(state.tournamentPoints).name+'</span></div><div class="detailStats"><div class="detailStat"><span class="mut">Очки лиги</span><b>'+state.tournamentPoints+'</b></div><div class="detailStat"><span class="mut">Победы</span><b>'+state.tournamentWins+'</b></div><div class="detailStat"><span class="mut">Поражения</span><b>'+state.tournamentLosses+'</b></div></div><div class="taskBar"><i style="width:'+tournamentRank(state.tournamentPoints).progress+'%"></i></div><div class="mut" style="margin-top:7px">'+(tournamentRank(state.tournamentPoints).next===null?'Высший дивизион достигнут':'До следующего дивизиона: '+(tournamentRank(state.tournamentPoints).next-state.tournamentPoints)+' очков')+'</div></div>'+
  '<div class="card glass" style="margin-top:16px;padding:18px"><div class="hRow"><div><h2>РЕЙТИНГОВЫЙ ПОДБОР</h2><div class="sub">Поиск соперников с близким уровнем рейтинга</div></div><span class="tag">'+tournamentRank(state.rating).name+'</span></div><div class="detailStats"><div class="detailStat"><span class="mut">Твой рейтинг</span><b>'+state.rating+'</b></div><div class="detailStat"><span class="mut">Окно поиска</span><b>±'+rankedSearchRange(state.rating)+'</b></div></div><div class="mut" style="margin:8px 0 14px">Здесь выполняется подбор реального игрока по рейтингу. Для матча оба игрока подключаются к общему серверу.</div><button class="btn primary big" data-ranked-start>НАЙТИ СОПЕРНИКА</button></div>'+
  '<div class="card glass devBox" style="margin-top:16px"><span class="tag dev">ОНЛАЙН · НУЖЕН СЕРВЕР</span><h2>РЕАЛЬНЫЙ PVP</h2><div class="mut" style="max-width:560px;margin:0 auto">Подключён сервер реального подбора и обмена состоянием бойцов. Рейтинговый бой запускается после соединения двух игроков.</div></div>';
 }
 function rankedSearchRange(rating){return Math.min(260,70+Math.floor(Math.max(0,Number(rating)||0)/500)*25);}
-function startRankedMatch(){connectRankedOnline();}
+function startRankedMatch(){connectRankedOnline({arenaType:'ranked'});}
+function startArenaMode(arenaType){
+ const single=['survival','raid','royale'].includes(arenaType);
+ const available=single?(state.team.find(id=>id&&byId(id))||state.owned.find(id=>byId(id))):onlineRoster()[0];
+ if(!available){say2('СНАЧАЛА ПОЛУЧИ ПЕРСОНАЖА');show('team');return;}
+ connectRankedOnline({arenaType});
+}
 
 /* ---------- summon ---------- */
 function renderSummon(){
