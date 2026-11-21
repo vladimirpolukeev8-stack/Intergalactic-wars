@@ -24,14 +24,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: Configure Telegram bot token when repository secret is available
         if: ${{ secrets.TELEGRAM_BOT_TOKEN != '' }}
-        uses: cloudflare/wrangler-action@v4
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          wranglerVersion: "4.166.0"
-          command: secret put TELEGRAM_BOT_TOKEN --config wrangler.toml
         env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+        run: printf '%s' "$TELEGRAM_BOT_TOKEN" | npx --yes wrangler@4.166.0 secret put TELEGRAM_BOT_TOKEN --config wrangler.toml
       - uses: cloudflare/wrangler-action@v4
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
